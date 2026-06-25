@@ -1,0 +1,28 @@
+appId: com.feedgrab.desktop
+productName: feedgrab Desktop
+electronDist: node_modules/electron/dist
+directories:
+  output: release-packages
+files:
+  - dist-electron/**/*
+  - dist-renderer/**/*
+  - package.json
+extraResources:
+  - from: runtime/feedgrab-runtime
+    to: feedgrab-runtime
+asar: true
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: feedgrab Desktop

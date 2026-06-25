@@ -55,6 +55,11 @@ output_*test*/
 output_smoke/
 dist-renderer/
 dist-electron/
+desktop/build/
+desktop/release/
+desktop/release-artifacts/
+desktop/release-packages/
+desktop/runtime/
 
 # External research source archives (GPL/MIT third-party code kept local only)
 tasks/twe_research/

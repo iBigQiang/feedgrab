@@ -33,6 +33,7 @@ export type PythonWorkerClientOptions = {
   command?: string;
   args?: string[];
   cwd?: string;
+  env?: NodeJS.ProcessEnv;
 };
 
 const platformMatchers: Array<[SupportedPlatform, RegExp]> = [
@@ -229,11 +230,13 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
   private readonly command: string;
   private readonly args: string[];
   private readonly cwd: string | undefined;
+  private readonly env: NodeJS.ProcessEnv | undefined;
 
   constructor(options: PythonWorkerClientOptions) {
     this.command = options.command ?? "python";
     this.args = options.args ?? ["-m", "feedgrab.worker"];
     this.cwd = options.cwd;
+    this.env = options.env;
   }
 
   onEvent(callback: (event: FeedgrabWorkerEvent) => void): () => void {
@@ -393,6 +396,7 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
       cwd: this.cwd,
       env: {
         ...process.env,
+        ...this.env,
         PYTHONIOENCODING: "utf-8"
       },
       stdio: ["pipe", "pipe", "pipe"],

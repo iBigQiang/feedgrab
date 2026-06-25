@@ -1,21 +1,85 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { appendFileSync, mkdirSync } from "node:fs";
 import { access, mkdir, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import type { FeedgrabWorkerEvent, FetchRequest } from "./ipc-types.js";
 import { createMockPythonWorkerClient, createPythonWorkerClient } from "./python-worker.js";
+import type { PythonWorkerClient } from "./python-worker.js";
+import { resolveFeedgrabRuntime } from "./runtime.js";
+import type { FeedgrabRuntimeResolution } from "./runtime.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..", "..");
 const allowedOpenRoots = new Set<string>();
 const allowedOpenPaths = new Set<string>();
-const worker =
-  process.env.FEEDGRAB_DESKTOP_MOCK === "true"
-    ? createMockPythonWorkerClient()
-    : createPythonWorkerClient({ cwd: projectRoot });
+let worker: PythonWorkerClient | undefined;
 
-worker.onEvent((event: FeedgrabWorkerEvent) => {
+function initializeWorker(): PythonWorkerClient {
+  if (worker) {
+    return worker;
+  }
+  smokeLog("initializing worker");
+  if (process.env.FEEDGRAB_DESKTOP_MOCK === "true") {
+    worker = createMockPythonWorkerClient();
+    smokeLog("mock worker selected");
+  } else {
+    const runtime = resolveFeedgrabRuntime({
+      projectRoot,
+      resourcesPath: process.resourcesPath,
+      userDataPath: app.getPath("userData"),
+      env: process.env
+    });
+    smokeLog(
+      `runtime source=${runtime.source} worker=${runtime.workerPath} browsers=${runtime.browserPath} cwd=${runtime.cwd}`
+    );
+    ensureRuntimeDirectories(runtime);
+    smokeLog("runtime directories ready");
+    worker = createPythonWorkerClient({
+      command: runtime.command,
+      args: runtime.args,
+      cwd: runtime.cwd,
+      env: runtime.env
+    });
+    console.info(
+      `[feedgrab runtime] source=${runtime.source} worker=${runtime.workerPath} browsers=${runtime.browserPath}`
+    );
+  }
+  worker.onEvent(forwardWorkerEvent);
+  return worker;
+}
+
+function currentWorker(): PythonWorkerClient {
+  return worker ?? initializeWorker();
+}
+
+function ensureRuntimeDirectories(runtime: FeedgrabRuntimeResolution): void {
+  const paths = [runtime.cwd, runtime.env.FEEDGRAB_DATA_DIR, runtime.env.OUTPUT_DIR];
+  if (!runtime.bundledBrowserAvailable) {
+    paths.push(runtime.browserPath);
+  }
+  for (const targetPath of paths) {
+    if (targetPath) {
+      mkdirSync(targetPath, { recursive: true });
+    }
+  }
+}
+
+function smokeLog(message: string): void {
+  const logPath = process.env.FEEDGRAB_DESKTOP_SMOKE_LOG_FILE;
+  if (!logPath) {
+    return;
+  }
+  try {
+    mkdirSync(path.dirname(logPath), { recursive: true });
+    appendFileSync(logPath, `[${new Date().toISOString()}] ${message}\n`, "utf8");
+  } catch {
+    // Smoke logging must never affect normal app startup.
+  }
+}
+
+function forwardWorkerEvent(event: FeedgrabWorkerEvent): void {
   if (event.event === "artifact" && event.artifact?.path) {
     allowedOpenPaths.add(path.resolve(event.artifact.path));
   }
@@ -24,9 +88,10 @@ worker.onEvent((event: FeedgrabWorkerEvent) => {
       window.webContents.send("feedgrab:workerEvent", event);
     }
   }
-});
+}
 
 function createWindow(): void {
+  smokeLog("creating browser window");
   const preload = path.join(__dirname, "preload.cjs");
   const window = new BrowserWindow({
     width: 1240,
@@ -71,6 +136,7 @@ function createWindow(): void {
     return;
   }
 
+  smokeLog(`loading renderer from ${path.join(__dirname, "../dist-renderer/index.html")}`);
   void window.loadFile(path.join(__dirname, "../dist-renderer/index.html"), screenshotViewLoadOptions());
   registerSmokeScreenshot(window);
 }
@@ -101,9 +167,12 @@ function registerSmokeScreenshot(window: BrowserWindow): void {
   }
 
   window.webContents.once("did-finish-load", () => {
+    smokeLog("renderer did-finish-load");
     const delayMs = Number(process.env.FEEDGRAB_DESKTOP_SCREENSHOT_DELAY_MS ?? "1200");
     setTimeout(() => {
-      void captureSmokeScreenshot(window, screenshotPath);
+      void captureSmokeScreenshot(window, screenshotPath).catch((error: unknown) => {
+        smokeLog(`screenshot failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
     }, Number.isFinite(delayMs) ? delayMs : 1200);
   });
 }
@@ -117,6 +186,7 @@ function screenshotViewLoadOptions(): { query: Record<string, string> } | undefi
 }
 
 async function captureSmokeScreenshot(window: BrowserWindow, screenshotPath: string): Promise<void> {
+  smokeLog(`capturing screenshot to ${screenshotPath}`);
   await mkdir(path.dirname(screenshotPath), { recursive: true });
   let png: Uint8Array = Buffer.alloc(0);
 
@@ -130,28 +200,29 @@ async function captureSmokeScreenshot(window: BrowserWindow, screenshotPath: str
   }
 
   await writeFile(screenshotPath, png);
+  smokeLog(`screenshot written (${png.length} bytes)`);
   app.quit();
 }
 
 function registerIpc(): void {
-  ipcMain.handle("feedgrab:ping", () => worker.ping());
-  ipcMain.handle("feedgrab:detectPlatform", (_event, url: string) => worker.detectPlatform(url));
+  ipcMain.handle("feedgrab:ping", () => currentWorker().ping());
+  ipcMain.handle("feedgrab:detectPlatform", (_event, url: string) => currentWorker().detectPlatform(url));
   ipcMain.handle("feedgrab:startFetch", (_event, request: FetchRequest) => {
     if (!isValidFetchRequest(request)) {
       throw new Error("无效抓取请求");
     }
     rememberOpenRoot(request.outputDirectory);
-    return worker.startFetch(request);
+    return currentWorker().startFetch(request);
   });
-  ipcMain.handle("feedgrab:cancelJob", (_event, jobId: string) => worker.cancelJob(jobId));
-  ipcMain.handle("feedgrab:doctor", () => worker.doctor());
+  ipcMain.handle("feedgrab:cancelJob", (_event, jobId: string) => currentWorker().cancelJob(jobId));
+  ipcMain.handle("feedgrab:doctor", () => currentWorker().doctor());
   ipcMain.handle("feedgrab:settingsSnapshot", async () => {
-    const snapshot = await worker.settingsSnapshot();
+    const snapshot = await currentWorker().settingsSnapshot();
     rememberOpenRoot(snapshot.outputDirectory);
     return snapshot;
   });
-  ipcMain.handle("feedgrab:loginStatus", () => worker.loginStatus());
-  ipcMain.handle("feedgrab:outputList", () => worker.outputList());
+  ipcMain.handle("feedgrab:loginStatus", () => currentWorker().loginStatus());
+  ipcMain.handle("feedgrab:outputList", () => currentWorker().outputList());
   ipcMain.handle("feedgrab:chooseOutputDirectory", async () => {
     const result = await dialog.showOpenDialog({
       title: "选择 feedgrab 输出目录",
@@ -234,6 +305,8 @@ function isPathInside(targetPath: string, rootPath: string): boolean {
 registerIpc();
 
 void app.whenReady().then(() => {
+  smokeLog("app ready");
+  initializeWorker();
   createWindow();
 
   app.on("activate", () => {
@@ -241,6 +314,8 @@ void app.whenReady().then(() => {
       createWindow();
     }
   });
+}).catch((error: unknown) => {
+  smokeLog(`app startup failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
 });
 
 app.on("window-all-closed", () => {
