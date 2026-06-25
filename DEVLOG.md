@@ -2,6 +2,39 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-06-25 · v0.26.0-dev · feedgrab-desktop GUI 客户端分支
+
+### 背景
+
+基于 `开发及迭代方案调研报告/feedgrab-GUI客户端长期技术选型综合调研报告.md`，在独立 `feedgrab-desktop` 分支启动可商业化桌面客户端开发。主路线采用 `Electron + Vite + React + TypeScript + Python Sidecar Worker`，不重写 Python 抓取核心，不把 GUI 做成 CLI 文本输出解析器。
+
+### 实施
+
+- 加固 `feedgrab/service/`：批量抓取结果保留每个 URL 的成功/失败结构，新增递归脱敏、Job 队列/取消/重试/并发限制配置、typed settings snapshot、结构化 doctor、login session 状态、output artifact 元数据。
+- 新增 `feedgrab/worker.py`：stdio JSON Lines sidecar worker，支持 `ping`、`detect_platform`、`fetch`、`cancel`、`doctor`、`settings_snapshot`、`login_status`、`output_list`，事件覆盖 `ready`、`job_started`、`progress`、`log`、`artifact`、`error`、`done`、`cancelled`、`diagnostic`；`fetch` 支持 GUI 传入 `output_dir`，并串行化实际抓取以避免 `OUTPUT_DIR` 环境竞争。
+- 新增 `desktop/`：Electron main/preload、typed IPC、Python worker client、Vite/React/TypeScript renderer、抓取/任务/输出/登录/设置/诊断/授权占位 UI，以及 Vitest 测试。
+- Electron renderer 运行在 `sandbox: true` + `contextIsolation: true` 下，preload 以 `.cts` 源文件输出为 `preload.cjs`，只暴露白名单 IPC；`index.html` 增加 CSP，`ELECTRON_RENDERER_URL` 限定 localhost，`openPath` 限定已授权输出目录或 worker 产物。
+- Renderer 订阅真实 worker 事件，使用 `job_started/progress/log/artifact/error/done/cancelled` 更新任务、日志、输出库；输出目录选择会本地持久化，并随抓取请求传给 worker。
+- `mcp_server.py` 与 CLI 批量路径兼容新的失败结果结构：成功项保持原内容输出，失败项返回或打印结构化错误，避免 `None` content 崩溃。
+- 新增 `docs/feedgrab-desktop-implementation-plan.md` 记录本分支边界、文件范围和验证命令。
+
+### 测试
+
+- `python -m pytest -q -p no:cacheprovider`：233 passed。
+- `python -m feedgrab.cli`：正常打印帮助页。
+- `python -m feedgrab.worker` JSONL smoke：输出 `ready` 与 `done/ping`。
+- `desktop`: `npm run typecheck`、`npm run lint`、`npm run test`、`npm run build` 通过。
+- Electron worker client smoke：构建后的 `dist-electron/python-worker.js` 启动 Python sidecar，真实抓取 `https://github.com/iBigQiang/feedgrab`，收到 `job_started`、`progress`、`artifact`、`done`，产物落到 `output_smoke/electron-client/`。
+- Electron built app smoke：默认真实 Python sidecar worker 路径成功渲染 7 个页面截图：`output_smoke/desktop-views/{fetch,jobs,output,login,settings,doctor,auth}.png`。
+
+### 兼容策略
+
+- 保持 CLI 命令、Markdown/front matter、去重索引、session 文件和 fetcher 行为不变。
+- GUI renderer 不直接访问 Node、文件系统、Cookie、API Key、session 原文或 Python 进程；所有能力经 preload 白名单 IPC。
+- 商业授权仅保留 scaffold/FeatureGate 占位，不接入真实支付或远程授权服务。
+
+---
+
 ## 2026-06-25 · v0.25.0 · 第一阶段 service layer 架构升级
 
 ### 背景

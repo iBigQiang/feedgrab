@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+node_modules/
 dist/
 build/
 .venv/
@@ -52,6 +53,8 @@ debug_*_output.json
 # Smoke test outputs
 output_*test*/
 output_smoke/
+dist-renderer/
+dist-electron/
 
 # External research source archives (GPL/MIT third-party code kept local only)
 tasks/twe_research/

@@ -35,6 +35,43 @@ feedgrab 可自由组合，按需使用：
 | **Claude Code 技能** | 视频转录 + AI 分析 + 内容抓取 | `npx skills add iBigQiang/feedgrab` | 可选 |
 | **MCP 服务器** | 将阅读能力暴露为 MCP 工具 | `python mcp_server.py` | 可选 |
 
+### 桌面客户端分支（开发中）
+
+`feedgrab-desktop` 分支正在开发可商业化 GUI 客户端，技术栈为：
+
+```text
+Electron + Vite + React + TypeScript
+  -> Electron preload typed IPC
+  -> Python Sidecar Worker (stdio JSON Lines)
+  -> feedgrab.service
+  -> UniversalReader / fetchers / storage
+```
+
+当前桌面分支目标是让普通用户无需命令行即可完成输出目录配置、单 URL / 多 URL 抓取、实时日志、Markdown 产物打开、登录状态、诊断和基础设置。GUI 不解析 CLI 文本输出，不直接 import fetcher，不把商业授权写入 fetcher。
+
+桌面端 renderer 通过 preload 白名单 IPC 与 Electron main 通信，由 main 启动 Python sidecar worker 并转发结构化事件。构建版默认使用真实 worker；mock 仅用于 browser/Vitest 测试环境。输出目录选择会传入 worker，本地 `openPath` 只允许打开已授权输出目录或 worker 产物。
+
+开发命令：
+
+```powershell
+cd desktop
+npm install
+npm run typecheck
+npm run lint
+npm run test
+npm run build
+```
+
+构建版截图 smoke 可用 `FEEDGRAB_DESKTOP_SCREENSHOT_VIEW=fetch|jobs|output|login|settings|doctor|auth` 选择页面。
+
+Python sidecar smoke：
+
+```powershell
+@'
+{"id":"smoke_ping","method":"ping","params":{}}
+'@ | python -m feedgrab.worker
+```
+
 ### 第一层：Python CLI
 
 ```bash

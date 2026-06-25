@@ -10,7 +10,7 @@ from loguru import logger
 
 from feedgrab.reader import UniversalReader
 from feedgrab.schema import UnifiedContent
-from feedgrab.service.models import Artifact, FetchRequest, FetchResult, ServiceError
+from feedgrab.service.models import Artifact, FetchRequest, FetchResult, ServiceError, redact_value
 
 
 class FetchService:
@@ -51,7 +51,24 @@ class FetchService:
         fetched: list[FetchResult] = []
         for url, result in zip(url_list, results):
             if isinstance(result, Exception):
-                logger.error(f"Batch failed for {url}: {result}")
+                platform = self.detect_platform(url)
+                error = result if isinstance(result, ServiceError) else ServiceError(
+                    str(result),
+                    code="fetch_error",
+                    recoverable=True,
+                    details={"url": url, "platform": platform},
+                )
+                logger.error(f"Batch failed for {redact_value(url)}: {error.message}")
+                fetched.append(
+                    FetchResult(
+                        request=FetchRequest(url=url),
+                        content=None,
+                        artifacts=[],
+                        platform=platform,
+                        success=False,
+                        error=error.to_dict(),
+                    )
+                )
                 continue
             fetched.append(result)
         return fetched

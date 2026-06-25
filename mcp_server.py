@@ -63,9 +63,23 @@ async def read_batch(urls: list[str]) -> str:
     import json
 
     results = await fetch_service.fetch_urls(urls)
-    contents = [result.content for result in results]
-    results = [c.to_dict() for c in contents]
-    return json.dumps(results, ensure_ascii=False, indent=2)
+    payload = []
+    for result in results:
+        if getattr(result, "success", True) and result.content is not None:
+            item = result.content.to_dict()
+            item["ok"] = True
+            payload.append(item)
+            continue
+
+        payload.append(
+            {
+                "ok": False,
+                "request": result.request.to_dict(),
+                "platform": result.platform,
+                "error": result.error,
+            }
+        )
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 @mcp.tool()

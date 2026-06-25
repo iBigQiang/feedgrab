@@ -7,6 +7,11 @@ contract without changing platform fetcher semantics.
 """
 
 from feedgrab.service.fetch import FetchService
+from feedgrab.service.jobs import JobService
+from feedgrab.service.settings import SettingsService
+from feedgrab.service.doctor import DoctorService
+from feedgrab.service.login import LoginService
+from feedgrab.service.output import OutputService
 from feedgrab.service.models import (
     Artifact,
     DiagnosticResult,
@@ -22,6 +27,11 @@ __all__ = [
     "FetchRequest",
     "FetchResult",
     "FetchService",
+    "JobService",
+    "SettingsService",
+    "DoctorService",
+    "LoginService",
+    "OutputService",
     "ProgressEvent",
     "ServiceError",
 ]

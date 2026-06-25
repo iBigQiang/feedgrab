@@ -126,10 +126,22 @@ def cmd_fetch(urls: list):
             print(f"   {item.content[:200]}...")
         else:
             results = await fetch_service.fetch_urls(urls)
-            items = [result.content for result in results]
-            for item in items:
-                print(f"\u2705 [{item.source_type.value}] {item.title[:60]}")
-            print(f"\n\U0001f4e6 Fetched {len(items)}/{len(urls)} URLs")
+            success_count = 0
+            for result in results:
+                if getattr(result, "success", True) and result.content is not None:
+                    item = result.content
+                    print(f"\u2705 [{item.source_type.value}] {item.title[:60]}")
+                    success_count += 1
+                    continue
+
+                request = getattr(result, "request", None)
+                error = getattr(result, "error", None) or {}
+                platform = getattr(result, "platform", "") or "unknown"
+                url = getattr(request, "url", "")
+                message = error.get("message") if isinstance(error, dict) else str(error)
+                print(f"\u274c Failed [{platform}] {url}: {message or 'unknown error'}")
+
+            print(f"\n\U0001f4e6 Fetched {success_count}/{len(urls)} URLs")
 
     try:
         asyncio.run(run())

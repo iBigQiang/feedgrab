@@ -122,6 +122,42 @@ def test_cli_fetch_uses_service_and_keeps_single_url_output(monkeypatch, capsys)
     assert "Sample body..." in out
 
 
+def test_cli_fetch_reports_batch_failures_without_crashing(monkeypatch, capsys):
+    import feedgrab.cli as cli
+
+    class FakeFetchService:
+        async def fetch_urls(self, urls):
+            from feedgrab.service.models import FetchRequest, FetchResult, ServiceError
+
+            return [
+                FetchResult(
+                    request=FetchRequest(url=urls[0]),
+                    content=_sample_content(),
+                    platform="github",
+                ),
+                FetchResult(
+                    request=FetchRequest(url=urls[1]),
+                    content=None,
+                    platform="web",
+                    success=False,
+                    error=ServiceError(
+                        "network down",
+                        code="fetch_error",
+                        details={"url": urls[1]},
+                    ).to_dict(),
+                ),
+            ]
+
+    monkeypatch.setattr(cli, "FetchService", FakeFetchService)
+
+    cli.cmd_fetch(["https://github.com/owner/repo", "https://example.com/fail"])
+
+    out = capsys.readouterr().out
+    assert "[github] Sample repo" in out
+    assert "Failed [web] https://example.com/fail: network down" in out
+    assert "Fetched 1/2 URLs" in out
+
+
 def test_mcp_read_url_uses_fetch_service(monkeypatch):
     _install_fake_mcp(monkeypatch)
 
@@ -156,6 +192,49 @@ def test_mcp_read_url_uses_fetch_service(monkeypatch):
     assert payload["title"] == "Sample repo"
     assert payload["source_type"] == "github"
     assert asyncio.run(mcp_server.detect_platform("https://github.com/owner/repo")) == "github"
+
+
+def test_mcp_read_batch_includes_structured_failure_without_none_crash(monkeypatch):
+    _install_fake_mcp(monkeypatch)
+
+    import mcp_server
+
+    mcp_server = importlib.reload(mcp_server)
+
+    class FakeFetchService:
+        async def fetch_urls(self, urls):
+            from feedgrab.service.models import FetchRequest, FetchResult, ServiceError
+
+            return [
+                FetchResult(
+                    request=FetchRequest(url=urls[0]),
+                    content=_sample_content(),
+                    platform="github",
+                ),
+                FetchResult(
+                    request=FetchRequest(url=urls[1]),
+                    content=None,
+                    platform="web",
+                    success=False,
+                    error=ServiceError(
+                        "network down",
+                        code="fetch_error",
+                        details={"url": urls[1]},
+                    ).to_dict(),
+                ),
+            ]
+
+    mcp_server.fetch_service = FakeFetchService()
+
+    raw = asyncio.run(
+        mcp_server.read_batch(["https://github.com/owner/repo", "https://example.com/fail"])
+    )
+    payload = json.loads(raw)
+
+    assert payload[0]["ok"] is True
+    assert payload[0]["title"] == "Sample repo"
+    assert payload[1]["ok"] is False
+    assert payload[1]["error"]["code"] == "fetch_error"
 
 
 def _install_fake_mcp(monkeypatch):

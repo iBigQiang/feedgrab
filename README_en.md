@@ -35,6 +35,43 @@ feedgrab is composable. Use the layers you need:
 | **Claude Code Skills** | Video transcription + AI analysis + content fetching | `npx skills add iBigQiang/feedgrab` | Optional |
 | **MCP Server** | Expose reading as MCP tools | `python mcp_server.py` | Optional |
 
+### Desktop Client Branch (In Development)
+
+The `feedgrab-desktop` branch is building a commercializable GUI client with:
+
+```text
+Electron + Vite + React + TypeScript
+  -> Electron preload typed IPC
+  -> Python Sidecar Worker (stdio JSON Lines)
+  -> feedgrab.service
+  -> UniversalReader / fetchers / storage
+```
+
+The desktop branch aims to let non-CLI users configure an output directory, run single-URL and multi-URL fetches, view live logs, open Markdown artifacts, inspect login status, run diagnostics, and adjust basic settings. The GUI does not parse CLI text output, does not import fetchers directly, and does not put commercial license checks inside fetchers.
+
+The renderer talks to Electron main only through the preload allowlisted IPC API. Main starts the Python sidecar worker and forwards structured worker events. Built Electron runs the real worker by default; the mock path is reserved for browser/Vitest tests. The selected output directory is passed into the worker, and local `openPath` is restricted to authorized output roots or worker artifacts.
+
+Development commands:
+
+```powershell
+cd desktop
+npm install
+npm run typecheck
+npm run lint
+npm run test
+npm run build
+```
+
+Built-app screenshot smoke can use `FEEDGRAB_DESKTOP_SCREENSHOT_VIEW=fetch|jobs|output|login|settings|doctor|auth`.
+
+Python sidecar smoke:
+
+```powershell
+@'
+{"id":"smoke_ping","method":"ping","params":{}}
+'@ | python -m feedgrab.worker
+```
+
 ### Layer 1: Python CLI
 
 ```bash
