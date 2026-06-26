@@ -3,11 +3,7 @@
 
 # feedgrab Desktop
 
-### 现已支持抓取的平台：X/Twitter、微信公众号、小红书、YouTube、Biibi2、GitHub、LinuxDo、iDCFlare、飞书、金山文档、FlowUs、有道云笔记、知乎、知识星球、小宇宙、喜马拉雅、RSS、Telegram、付费新闻、任意网页
-
 ### 🌐 唯一官方网站：**[https://github.com/iBigQiang](https://github.com/iBigQiang/feedgrab/tree/feedgrab-desktop)**
-
-[English](README_en.md) | 中文(README.md) 
 
 </div>
 
