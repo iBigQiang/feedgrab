@@ -1,15 +1,11 @@
 
 <div align="center">
-
-# feedgrab Desktop
-
+  
 ### 🌐 唯一官方网站：**[https://github.com/iBigQiang](https://github.com/iBigQiang/feedgrab/tree/feedgrab-desktop)**
 
 </div>
 
-## ❤️赞助商
-
-> [想出现在这里？](mailto:ibigqiang@gmail.com)
+## ❤️feedgrab Desktop赞助商  [想出现在这里？](mailto:ibigqiang@gmail.com)
 
 [![嗨图象](https://github.com/iBigQiang/HiTuMe/blob/feat/i18n-en-zh/public/og.jpeg)](https://hitu.me/zh)
 
