@@ -1,7 +1,7 @@
 
 <div align="center">
   
-### 🌐 唯一官方网站：**[https://github.com/iBigQiang](https://github.com/iBigQiang/feedgrab/tree/feedgrab-desktop)**
+### 🌐 官方仓库：**[https://github.com/iBigQiang/feedgrab](https://github.com/iBigQiang/feedgrab/tree/feedgrab-desktop)**
 
 </div>
 
