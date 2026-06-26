@@ -7,7 +7,7 @@
 
 ---
 
-## ❤️feedgrab Desktop赞助商 
+## ❤️ feedgrab Desktop赞助商 
 
 > [想出现在这里？](mailto:ibigqiang@gmail.com)
 
