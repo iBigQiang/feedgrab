@@ -1,7 +1,7 @@
 
 <div align="center">
   
-### 🌐 官方仓库：**[https://edgeone.gh-proxy.com/https://github.com/iBigQiang/feedgrab](https://edgeone.gh-proxy.com/https://github.com/iBigQiang/feedgrab/tree/feedgrab-desktop)**
+### 🌐 官方仓库：**[https://github.com/iBigQiang/feedgrab](https://edgeone.gh-proxy.com/https://github.com/iBigQiang/feedgrab/tree/feedgrab-desktop)**
 
 </div>
 
