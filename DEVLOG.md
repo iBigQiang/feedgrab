@@ -39,6 +39,8 @@
 - 安装包大小：`384214024` bytes。
 - 安装包 SHA256：`B66642BE164F94C9E6959082467AD4158327ADA9E836617B7BA729F9629E72B2`。
 - 安装包签名状态：未签名。
+- GitHub Release：`desktop-v0.1.0-20260627`，asset `feedgrab-desktop-setup-0.1.0.exe` 已上传，GitHub API digest 为 `sha256:b66642be164f94c9e6959082467ad4158327ada9e836617b7ba729f9629e72b2`。
+- 下载地址核验：GitHub API 返回的 `browser_download_url` 为 `https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.0-20260627/feedgrab-desktop-setup-0.1.0.exe`，`curl.exe -I -L` 最终返回 `200 OK`，`Content-Length: 384214024`。
 
 ### 状态：已完成 ✅
 

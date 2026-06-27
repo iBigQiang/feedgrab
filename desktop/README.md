@@ -21,6 +21,8 @@ feedgrab Desktop 是 feedgrab 的 Windows 图形客户端分支，面向不想�
 B66642BE164F94C9E6959082467AD4158327ADA9E836617B7BA729F9629E72B2
 ```
 
+上方下载地址来自 GitHub API 返回的 `browser_download_url`，已用 `curl.exe -I -L` 核验，最终返回 `200 OK`，文件大小 `384214024` bytes。
+
 开发者/便携版可在本地运行 `npm run pack:dev` 或 `npm run pack:all` 生成。
 
 ## 安装与启动

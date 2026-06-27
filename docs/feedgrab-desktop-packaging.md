@@ -26,6 +26,7 @@
 | 打包时间 | `2026-06-27 21:58:01 +08:00` |
 | SHA256 | `B66642BE164F94C9E6959082467AD4158327ADA9E836617B7BA729F9629E72B2` |
 | 签名状态 | 未签名 |
+| 在线核验 | GitHub API `browser_download_url` 与上方下载地址一致，`curl.exe -I -L` 最终返回 `200 OK` |
 
 发布 Release 时必须指定 `--target feedgrab-desktop`，避免 tag 指向 `main`。
 
