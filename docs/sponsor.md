@@ -23,5 +23,5 @@
 如果 feedgrab 对你有帮助，欢迎请作者喝杯咖啡 :)
 
 <p align="center">
-  <img src="https://edgeone.gh-proxy.com/https://github.com/iBigQiang/feedgrab/raw/feedgrab-desktop/docs/Payment_QR_code.png" alt="打赏码" width="600">
+  <img src="https://edgeone.gh-proxy.com/https://raw.githubusercontent.com/iBigQiang/OPC-X-Reply-Extension/main/docs/readme_img/Payment_QR_code.png" alt="打赏码" width="600">
 </p>
