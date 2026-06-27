@@ -108,11 +108,17 @@ async def _find_account(page, account_name: str) -> Optional[dict]:
         logger.warning(f"[mpweixin-id] No accounts found for '{account_name}'")
         return None
 
-    # Exact match first, then first result
+    # Account batch fetch needs the exact official account fakeid.  Using the
+    # first fuzzy search result can silently fetch the wrong account or zero rows.
     for acc in accounts:
         if acc.get("nickname") == account_name:
             return acc
-    return accounts[0]
+    candidates = "、".join(str(acc.get("nickname", "")).strip() for acc in accounts[:5] if acc.get("nickname"))
+    logger.warning(
+        f"[mpweixin-id] No exact account match for '{account_name}'. "
+        f"Candidates: {candidates or 'none'}"
+    )
+    return None
 
 
 async def _fetch_article_list(page, fakeid: str, begin: int = 0,

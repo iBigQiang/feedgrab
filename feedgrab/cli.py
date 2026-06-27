@@ -1645,6 +1645,8 @@ def cmd_twitter_search(args: list):
         print(f"\n\U0001f50d X batch search: {len(keywords)} keywords ({mode})")
 
     all_tweets_merged: list[dict] = []
+    successful_keywords = 0
+    failed_keywords: list[str] = []
 
     for ki, keyword in enumerate(keywords):
         if len(keywords) > 1:
@@ -1678,6 +1680,7 @@ def cmd_twitter_search(args: list):
             if result.get("saved"):
                 print(f"   Individual tweets saved: {result['saved']}")
 
+            successful_keywords += 1
             if merge:
                 for td in result.get("tweets", []):
                     td["_keyword"] = keyword
@@ -1689,11 +1692,16 @@ def cmd_twitter_search(args: list):
             raise
         except Exception as e:
             print(f"\u274c [{keyword}] {e}")
+            failed_keywords.append(keyword)
             if len(keywords) == 1:
                 sys.exit(1)
 
+    if failed_keywords and successful_keywords == 0:
+        print(f"\u274c X search failed for all keywords: {', '.join(failed_keywords)}")
+        sys.exit(1)
+
     # Generate merged summary table
-    if merge and all_tweets_merged:
+    if merge:
         from feedgrab.fetchers.twitter_keyword_search import _generate_summary_table, _resolve_output_base
         from pathlib import Path
         from datetime import datetime as _dt

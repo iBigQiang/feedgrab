@@ -6,6 +6,24 @@ import asyncio
 import pytest
 
 
+def test_mpweixin_account_requires_exact_account_match():
+    from feedgrab.fetchers import mpweixin_account
+
+    class FakePage:
+        async def evaluate(self, _script, _account_name):
+            return {
+                "base_resp": {"ret": 0},
+                "list": [
+                    {"nickname": "强子的学习手记", "fakeid": "first"},
+                    {"nickname": "强子的商家运营手记", "fakeid": "second"},
+                ],
+            }
+
+    account = asyncio.run(mpweixin_account._find_account(FakePage(), "强子手记"))
+
+    assert account is None
+
+
 def test_mpweixin_account_preserves_session_expired_error(monkeypatch, tmp_path):
     """Session errors before pagination should not be masked by cleanup state."""
     from feedgrab.fetchers import mpweixin_account

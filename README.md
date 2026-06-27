@@ -47,9 +47,15 @@ Electron + Vite + React + TypeScript
   -> UniversalReader / fetchers / storage
 ```
 
-当前桌面分支目标是让普通用户无需命令行即可完成输出目录配置、单 URL / 多 URL 抓取、实时日志、Markdown 产物打开、登录状态、诊断和基础设置。GUI 不解析 CLI 文本输出，不直接 import fetcher，不把商业授权写入 fetcher。
+当前桌面分支目标是让普通用户无需命令行即可完成输出目录配置、单 URL / 多 URL 抓取、搜索/账号类抓取入口、实时日志、Markdown 产物打开、登录状态、诊断和基础设置。抓取页支持 URL 自动识别；当输入不是 URL 时，可先选择 X / Twitter、小红书、YouTube、知乎或微信公众号，再由客户端提交结构化任务，对应 `x-so`、`xhs-so`、`ytb-so`、`zhihu-so`、`mpweixin-id` 等能力。GUI 不拼 shell 命令，不直接 import fetcher，不把商业授权写入 fetcher。
 
-桌面端 renderer 通过 preload 白名单 IPC 与 Electron main 通信，由 main 启动 Python sidecar worker 并转发结构化事件。构建版默认使用真实 worker；mock 仅用于 browser/Vitest 测试环境。输出目录选择会传入 worker，本地 `openPath` 只允许打开已授权输出目录或 worker 产物。
+桌面端 renderer 通过 preload 白名单 IPC 与 Electron main 通信，由 main 启动 Python sidecar worker 并转发结构化事件。构建版默认使用真实 worker；mock 仅用于 browser/Vitest 测试环境。输出目录选择会传入 worker，本地 `openPath` 只允许打开已授权输出目录或 worker 产物。基础设置包含网络代理开关、代理地址和不走代理地址，保存后会注入 worker 环境变量，并用于 HTTP 抓取、Playwright 新浏览器和 Electron 在线说明文档加载；复用 Chrome CDP 时继承用户已打开 Chrome 的代理/VPN 状态。
+
+桌面端说明与安装包入口：
+
+- [Windows 桌面客户端说明](desktop/README.md)
+- [Windows 打包说明](docs/feedgrab-desktop-packaging.md)
+- [feedgrab Desktop 0.1.0 预览安装包](https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.0-20260627/feedgrab-desktop-setup-0.1.0.exe)
 
 开发命令：
 

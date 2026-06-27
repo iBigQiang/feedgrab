@@ -2,6 +2,79 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-06-27 · v0.26.2-dev · 桌面端安装包阶段性发布
+
+### 背景
+
+`feedgrab-desktop` 分支已完成基础代理设置、关键词/账号抓取入口、登录/设置/诊断页优化和赞助/社群在线文档渲染修复，需要生成普通用户可安装的 Windows 预览包，并把真实下载入口同步到当前分支文档。主分支 `main` 本轮不改动。
+
+### 方案决策
+
+- 只打包普通用户 NSIS 安装器，命令为 `desktop` 目录下的 `npm run pack:user`。
+- 安装包体积约 384MB，不提交到 Git 分支，继续遵守 `.gitignore` 中 `desktop/release-packages/` 的本地产物约定。
+- 安装包作为 GitHub Release asset 发布，tag 固定为 `desktop-v0.1.0-20260627`，并显式指向 `feedgrab-desktop` 分支。
+- Release asset 使用无空格文件名 `feedgrab-desktop-setup-0.1.0.exe`，避免下载链接转义歧义；本地 electron-builder 原始文件名仍为 `feedgrab Desktop Setup 0.1.0.exe`。
+
+### 改动范围
+
+| 文件 | 类型 | 改动 |
+|------|------|------|
+| `desktop/README.md` | 修改 | 增加真实安装包下载地址、发布页、SHA256 和安装说明 |
+| `docs/feedgrab-desktop-packaging.md` | 修改 | 记录当前预览发布 tag、asset URL、本地产物路径、签名状态和发布约束 |
+| `docs/sponsor.md` / `docs/group.md` | 新建/修改 | 提供赞助和社群页在线 Markdown 源文件，客户端失败时回退内置文档 |
+| `feedgrab-desktop-readme.md` | 修改 | 将旧的“无安装器脚本”说明更新为当前打包脚本和预览安装包状态 |
+| `README.md` / `README_en.md` | 修改 | 增加桌面客户端说明、打包说明和预览安装包入口 |
+| `.claude/commands/ship-desktop.md` | 新建 | 增加桌面端当前分支收尾命令，限定重打包 exe、发布 Release asset、核验真实下载地址并最终推送当前分支 |
+| `desktop/renderer/src/App.tsx` / `styles.css` / `desktop/tests/App.test.tsx` | 修改 | 修复赞助页远程 Markdown 表格顺序和 HTML 打赏图渲染，补充回归测试 |
+
+### 验证结果
+
+- `desktop`: `npm test -- App.test.tsx`：29 passed。
+- `desktop`: `npm test`：48 passed。
+- `python -m pytest tests/test_service_desktop.py tests/test_worker_protocol.py tests/test_service_layer.py tests/test_mpweixin_account.py -q -p no:cacheprovider`：51 passed。
+- `desktop`: `npm run lint`：通过。
+- `desktop`: `npm run build`：通过。
+- `git diff --check` / `git diff --cached --check`：通过。
+- `desktop`: `npm run pack:user`：成功生成 `D:\AiCode\feedgrab\desktop\release-packages\20260627-215707\feedgrab Desktop Setup 0.1.0.exe`。
+- 安装包大小：`384214024` bytes。
+- 安装包 SHA256：`B66642BE164F94C9E6959082467AD4158327ADA9E836617B7BA729F9629E72B2`。
+- 安装包签名状态：未签名。
+
+### 状态：已完成 ✅
+
+---
+
+## 2026-06-27 · v0.26.1-dev · 桌面端代理与关键词抓取入口
+
+### 背景
+
+桌面客户端基础设置需要提供真正生效的网络代理能力，解决普通用户只配置本机 HTTP/SOCKS 代理而非全局 TUN/VPN 时，客户端能打开但国际站抓取失败的问题。同时，抓取页原先只接受 URL，无法承接 `x-so`、`xhs-so`、`ytb-so`、`zhihu-so`、`mpweixin-id` 等搜索/账号类任务。
+
+### 实施
+
+- 基础设置新增 `FEEDGRAB_PROXY_ENABLED`、`FEEDGRAB_PROXY_URL`、`FEEDGRAB_NO_PROXY`，支持 `http://127.0.0.1:7890`、`socks5://127.0.0.1:7890`、`http://用户名:密码@IP:端口`，UI/日志/JSON 输出会隐藏密码。
+- 新增 `feedgrab/service/proxy.py`，集中处理代理启用状态、密码脱敏、标准环境变量投射、requests/curl_cffi 代理配置和 Playwright 代理配置。
+- `SettingsService` 在读取/保存桌面设置后投射 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY` 及小写变量；`http_client` 自动使用代理；Playwright 新建浏览器/context 读取代理配置。复用 Chrome CDP 时仍继承用户已打开 Chrome 的网络状态，不强改 Chrome 代理。
+- Electron runtime 启动 Python sidecar worker 时注入保存的代理环境；Electron main 通过代理感知 IPC 拉取在线 `sponsor.md` / `group.md`，并在设置保存后刷新 Electron session 代理。
+- 诊断页新增 `proxy_connectivity` 检查，区分代理未启用、代理未配置、代理不可达和网络超时等状态。
+- 抓取页平台按钮改为可选，输入框改为“抓取目标（URL / 关键词 / 关键词组 / 账号）”。URL 输入保持原自动识别；非 URL 输入按选中平台生成结构化任务和命令预览：X/Twitter → `x-so`，小红书 → `xhs-so`，YouTube → `ytb-so`，知乎 → `zhihu-so`，微信公众号第一版默认账号批量 → `mpweixin-id`。
+- worker `fetch` 方法兼容原 URL 列表，同时新增 `platform/mode/targets` 结构化任务分支，通过白名单映射调用已有 CLI 函数，不拼 shell 命令。
+
+### 测试
+
+- `python -m pytest tests -q`：245 passed。
+- `desktop`: `npm test`：38 passed。
+- `desktop`: `npm run typecheck`、`npm run lint`、`npm run build` 通过。
+- 直接运行根目录 `python -m pytest -q` 会收集旧桌面打包产物中的第三方 `bs4/tests`，因多个 release/runtime 目录存在同名模块在收集阶段失败；本次验证改用仓库自身 `tests/` 目录。
+
+### 兼容策略
+
+- URL 抓取 IPC、CLI URL 抓取、Markdown/front matter、去重索引和 session 文件语义保持不变。
+- 代理关闭时不主动改写未配置 feedgrab 代理的系统代理环境；只有保存了 feedgrab 代理字段才投射到 worker 进程。
+- Electron 远程 Markdown IPC 只允许预置 GitHub raw/proxy 文档 URL，不开放任意网络请求。
+
+---
+
 ## 2026-06-25 · v0.26.0-dev · feedgrab-desktop GUI 客户端分支
 
 ### 背景

@@ -113,7 +113,7 @@ def _login_visible(login_url: str, session_path: Path, platform: str) -> None:
 
     print(f"🌐 Opening {platform} login page: {login_url}")
     print("   Please log in manually in the browser window.")
-    print("   When done, close the browser or press Ctrl+C.\n")
+    print("   登录成功后请关闭浏览器窗口，feedgrab 会保存登录态。\n")
 
     with sync_playwright() as p:
         # Prefer real Chrome channel over bundled Chromium to reduce login friction.
@@ -129,10 +129,8 @@ def _login_visible(login_url: str, session_path: Path, platform: str) -> None:
         page.goto(login_url)
 
         try:
-            page.wait_for_event("close", timeout=300_000)
+            page.wait_for_event("close", timeout=0)
         except KeyboardInterrupt:
-            pass
-        except Exception:
             pass
 
         _save_session(context, session_path)

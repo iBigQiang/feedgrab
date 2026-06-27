@@ -1,8 +1,8 @@
 # feedgrab Desktop 中文使用说明
 
 > 适用分支：`feedgrab-desktop`
-> 文档日期：2026-06-25
-> 当前状态：本地源码构建版。尚未提供签名安装包、自动更新、真实授权激活或应用商店发布包。
+> 文档日期：2026-06-27
+> 当前状态：Windows 安装器预览版。已提供 `feedgrab-desktop` 分支安装包，尚未提供代码签名、自动更新、真实授权激活或应用商店发布包。
 
 `feedgrab Desktop` 是 feedgrab 的桌面 GUI 客户端分支，技术栈为：
 
@@ -30,7 +30,17 @@ Electron + Vite + React + TypeScript
 | 诊断 | 展示 Python、浏览器、网络、输出目录可写性等基础诊断信息 |
 | 授权 | 商业化占位页；当前不接入真实支付、License 激活或远程授权服务 |
 
-需要特别注意：当前桌面端还没有内置登录流程、安装器、自动更新、授权服务器、API Key 编辑器、Cookie 编辑器、输出库搜索/删除/导出等完整商业化能力。需要登录的平台仍然先走 CLI/session 流程。
+需要特别注意：当前桌面端已具备登录状态检测/导入、平台登录入口、安装器打包和基础设置页，但还没有自动更新、授权服务器、完整 API Key 编辑器、Cookie 编辑器、输出库搜索/删除/导出等完整商业化能力。需要登录的平台可通过客户端登录页或既有 CLI/session 流程准备登录态。
+
+## 1.1 Windows 安装包预览
+
+当前预览安装包发布在 GitHub Releases：
+
+- 发布页：<https://github.com/iBigQiang/feedgrab/releases/tag/desktop-v0.1.0-20260627>
+- Windows 安装包：<https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.0-20260627/feedgrab-desktop-setup-0.1.0.exe>
+- SHA256：`4AAD93A5F323C924B3B1D9FF07EFA4A5D02C9C14E6BB78E0F9D62E7B4168499E`
+
+安装包由 `feedgrab-desktop` 分支构建，内置 Python sidecar worker、Playwright Chromium runtime 和空白 session 模板。安装包未做代码签名，Windows 首次运行可能出现安全提示。
 
 ## 2. 下载源码
 
@@ -161,13 +171,18 @@ $env:OUTPUT_DIR = "D:\Notes\Feeds"
 
 ### 4.2 session / Cookie 目录
 
-默认 session 目录是仓库根目录下的 `sessions/`。需要改位置时，在启动 CLI 或桌面端前设置：
+CLI 默认 session 目录是仓库根目录下的 `sessions/`。桌面客户端分两种情况：
+
+- 开发环境：默认从 `D:\AiCode\feedgrab\desktop\sessions` 导入本机登录态。
+- 安装版：安装目录根部会带一个 `sessions` 子目录，里面来自仓库的 `desktop/session-templates` 空白模板，用户可以手动填写或通过登录流程生成真实登录态。
+
+需要改运行数据目录时，在启动 CLI 或桌面端前设置：
 
 ```powershell
 $env:FEEDGRAB_DATA_DIR = "D:\feedgrab-sessions"
 ```
 
-桌面端登录页当前只读取 session 状态，不负责写入 Cookie。需要登录的平台请先运行 CLI 登录命令。
+注意：仓库不会提交真实 Cookie。`desktop/session-templates` 只保存空白 JSON 模板；GUI 导入时会忽略空白模板，避免把模板当作有效登录态，也避免误停用用户已有账号。
 
 ### 4.3 User-Agent
 
@@ -251,12 +266,15 @@ npm run build
 当前 `desktop/package.json` 只有这些脚本：
 
 - `dev`：启动 Vite renderer dev server。
+- `pack:dev`：构建开发者 portable `.exe`。
+- `pack:user`：构建普通用户 NSIS 安装器。
+- `pack:all`：同时构建 portable 和 NSIS 安装器。
 - `typecheck`：检查 renderer 和 Electron TypeScript。
 - `lint`：运行 ESLint。
 - `test`：运行 Vitest。
 - `build`：构建 renderer 和 Electron main/preload。
 
-当前没有 `npm start`、`electron:dev`、`pack`、`make`、`dist` 或安装器脚本。
+当前没有 `npm start`、`electron:dev`、`make` 或自动更新发布脚本。安装器产物默认输出到 `desktop\release-packages\yyyyMMdd-HHmmss\`，该目录不提交到源码分支，正式下载走 GitHub Release asset。
 
 ### 5.4 截图 smoke
 
@@ -375,7 +393,7 @@ $env:CHROME_CDP_LOGIN = ""
 
 1. 启动桌面客户端。
 2. 打开“抓取”页。
-3. 在“内容链接”输入框中粘贴一个 URL，例如：
+3. 在“抓取目标（URL / 关键词 / 关键词组 / 账号）”输入框中粘贴一个 URL，例如：
 
 ```text
 https://github.com/iBigQiang/feedgrab
@@ -393,7 +411,7 @@ D:\Notes\Feeds
 
 ### 8.2 多链接批量抓取
 
-在“内容链接”中每行放一个 URL：
+在“抓取目标（URL / 关键词 / 关键词组 / 账号）”中每行放一个 URL：
 
 ```text
 https://github.com/iBigQiang/feedgrab
@@ -403,7 +421,19 @@ https://mp.weixin.qq.com/s/g7ASDLvrVN9eNgYDvrNKeA
 
 点击“开始抓取”后，worker 会按当前实现串行抓取，避免多个 URL 同时修改 `OUTPUT_DIR`。成功和失败会分别进入任务日志；部分失败不会影响其他 URL 的继续处理。
 
-### 8.3 任务页
+### 8.3 关键词或账号抓取
+
+输入内容不是 URL 时，先在“现已支持的平台”中点亮目标平台，再填写关键词、关键词组或账号名。客户端会显示“将执行：...”预览，但后台提交的是结构化任务，不拼接 shell 命令。
+
+示例：
+
+```text
+claude code,openclaw
+```
+
+选择 X / Twitter 时对应 `feedgrab x-so "claude code,openclaw"`；选择小红书时对应 `feedgrab xhs-so "claude code,openclaw"`；选择 YouTube 时对应 `feedgrab ytb-so "claude code,openclaw"`；选择知乎时对应 `feedgrab zhihu-so "claude code,openclaw"`；选择微信公众号时第一版默认按账号批量，对应 `feedgrab mpweixin-id "账号名"`。
+
+### 8.4 任务页
 
 任务页用于查看：
 
@@ -414,7 +444,7 @@ https://mp.weixin.qq.com/s/g7ASDLvrVN9eNgYDvrNKeA
 
 当前任务页不是完整历史任务数据库；关闭应用后任务状态不会作为长期任务中心保存。
 
-### 8.4 输出页
+### 8.5 输出页
 
 输出页展示 worker 返回或输出服务扫描到的 Markdown 产物。点击“打开”时，Electron main 会检查路径：
 
@@ -423,9 +453,17 @@ https://mp.weixin.qq.com/s/g7ASDLvrVN9eNgYDvrNKeA
 - 支持打开的常见后缀包括 `.md`、`.csv`、`.srt`、图片、音频和视频文件。
 - 未授权目录或不存在的路径会被拒绝。
 
-### 8.5 设置页
+### 8.6 设置页
 
-当前设置页主要用于查看和选择输出目录。平台高级选项仍建议通过环境变量或 `.env.example` 中的配置项管理，例如：
+当前设置页可以查看和修改基础设置、代理设置和平台配置。网络代理位于“基础设置”，包含：
+
+- `启用代理`：默认关闭。
+- `代理地址`：支持 `http://127.0.0.1:7890`、`socks5://127.0.0.1:7890`、`http://用户名:密码@IP:端口`，密码会在 UI 和日志中隐藏。
+- `不走代理地址`：默认 `127.0.0.1,localhost`，避免本地 worker、CDP 端口和 Electron 内部服务被代理干扰。
+
+保存后，桌面端会把代理注入 Python sidecar worker 的 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY` 环境变量，并让 Python HTTP 抓取、Playwright 新启动浏览器和 Electron 在线赞助/社群文档加载使用同一设置。若复用 Chrome CDP，客户端只继承用户已打开 Chrome 的代理/VPN 状态，不强行修改 Chrome 代理。
+
+部分平台高级选项仍可通过环境变量或 `.env.example` 中的配置项管理，例如：
 
 - `X_DOWNLOAD_MEDIA`
 - `X_FETCH_ALL_COMMENTS`
@@ -439,18 +477,24 @@ https://mp.weixin.qq.com/s/g7ASDLvrVN9eNgYDvrNKeA
 
 ## 9. CLI 与 GUI 的关系
 
-桌面端覆盖的是通用 URL 抓取工作台。以下命令型能力仍建议继续使用 CLI：
+桌面端覆盖通用 URL 抓取工作台，并已接入一部分搜索/账号类任务。抓取页输入 URL 时保持自动识别；输入关键词或账号时，先选择平台，客户端会生成结构化任务并显示预览，例如：
 
 ```powershell
 feedgrab "https://example.com/article"
 feedgrab "https://url1.com" "https://url2.com"
-feedgrab clip
 feedgrab x-so "AI Agent"
 feedgrab xhs-so "AI Agent"
 feedgrab mpweixin-id "公众号名"
+feedgrab ytb-so "AI Agent"
+feedgrab zhihu-so "AI Agent"
+```
+
+以下命令型能力仍建议继续使用 CLI：
+
+```powershell
+feedgrab clip
 feedgrab mpweixin-so "AI Agent"
 feedgrab feishu-wiki "https://xxx.feishu.cn/wiki/ABC123"
-feedgrab ytb-so "AI Agent"
 feedgrab ytb-dlv "https://www.youtube.com/watch?v=xxx"
 feedgrab ytb-dla "https://www.youtube.com/watch?v=xxx"
 feedgrab ytb-dlz "https://www.youtube.com/watch?v=xxx"

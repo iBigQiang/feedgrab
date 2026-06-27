@@ -47,9 +47,15 @@ Electron + Vite + React + TypeScript
   -> UniversalReader / fetchers / storage
 ```
 
-The desktop branch aims to let non-CLI users configure an output directory, run single-URL and multi-URL fetches, view live logs, open Markdown artifacts, inspect login status, run diagnostics, and adjust basic settings. The GUI does not parse CLI text output, does not import fetchers directly, and does not put commercial license checks inside fetchers.
+The desktop branch aims to let non-CLI users configure an output directory, run single-URL and multi-URL fetches, start search/account-style fetches, view live logs, open Markdown artifacts, inspect login status, run diagnostics, and adjust basic settings. The fetch page keeps URL auto-detection for links. For non-URL input, users can select X / Twitter, Xiaohongshu, YouTube, Zhihu, or WeChat, and the client submits a structured task mapped to `x-so`, `xhs-so`, `ytb-so`, `zhihu-so`, or `mpweixin-id`. The GUI does not concatenate shell commands, does not import fetchers directly, and does not put commercial license checks inside fetchers.
 
-The renderer talks to Electron main only through the preload allowlisted IPC API. Main starts the Python sidecar worker and forwards structured worker events. Built Electron runs the real worker by default; the mock path is reserved for browser/Vitest tests. The selected output directory is passed into the worker, and local `openPath` is restricted to authorized output roots or worker artifacts.
+The renderer talks to Electron main only through the preload allowlisted IPC API. Main starts the Python sidecar worker and forwards structured worker events. Built Electron runs the real worker by default; the mock path is reserved for browser/Vitest tests. The selected output directory is passed into the worker, and local `openPath` is restricted to authorized output roots or worker artifacts. Basic settings include a network proxy toggle, proxy URL, and no-proxy list. Once saved, the proxy is injected into the worker environment and used by HTTP fetching, newly launched Playwright browsers, and Electron-loaded online markdown docs. Chrome CDP reuse inherits the already-open Chrome profile's proxy/VPN state instead of forcing a client-side override.
+
+Desktop docs and installer entry points:
+
+- [Windows desktop client guide](desktop/README.md)
+- [Windows packaging guide](docs/feedgrab-desktop-packaging.md)
+- [feedgrab Desktop 0.1.0 preview installer](https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.0-20260627/feedgrab-desktop-setup-0.1.0.exe)
 
 Development commands:
 

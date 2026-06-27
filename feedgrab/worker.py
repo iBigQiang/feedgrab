@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import io
 import json
 import os
+import re
 import sys
 from typing import Any, TextIO
 
@@ -29,7 +32,10 @@ SUPPORTED_METHODS = (
     "cancel",
     "doctor",
     "settings_snapshot",
+    "settings_schema",
+    "settings_update",
     "login_status",
+    "import_login_sessions",
     "output_list",
 )
 _SENSITIVE_KEY_PARTS = (
@@ -46,6 +52,61 @@ _SENSITIVE_KEY_PARTS = (
     "session",
     "token",
 )
+_STRUCTURED_COMMANDS = {
+    ("twitter", "search"): "x-so",
+    ("x", "search"): "x-so",
+    ("xhs", "search"): "xhs-so",
+    ("youtube", "search"): "ytb-so",
+    ("zhihu", "search"): "zhihu-so",
+    ("wechat", "account"): "mpweixin-id",
+    ("wechat", "search"): "mpweixin-so",
+}
+_ARTIFACT_PATH_LINE_RE = re.compile(
+    r"(?:Saved to Markdown|Summary table saved|CSV table saved|Merged summary|Summary|CSV|Downloaded|List):\s*"
+    r"(?P<path>.+?\.(?:md|csv))\s*$",
+    re.IGNORECASE,
+)
+_ZERO_ACCOUNT_OUTPUT_RE = re.compile(
+    r"Total:\s*0,\s*Fetched:\s*0,\s*Skipped:\s*0,\s*Failed:\s*0",
+    re.IGNORECASE,
+)
+
+
+class StructuredCommandError(RuntimeError):
+    """Structured CLI command failed after producing captured output."""
+
+    def __init__(self, message: str, *, stdout_text: str = "", stderr_text: str = ""):
+        super().__init__(message)
+        self.stdout_text = stdout_text
+        self.stderr_text = stderr_text
+
+
+class _CaptureTextIO(io.StringIO):
+    def reconfigure(self, **_: Any) -> None:
+        return None
+
+
+class _StreamingCaptureTextIO(_CaptureTextIO):
+    def __init__(self, on_line):
+        super().__init__()
+        self._on_line = on_line
+        self._pending = ""
+
+    def write(self, text: str) -> int:
+        written = super().write(text)
+        self._pending += text
+        while "\n" in self._pending:
+            line, self._pending = self._pending.split("\n", 1)
+            line = line.rstrip("\r").strip()
+            if line:
+                self._on_line(line)
+        return written
+
+    def flush_pending(self) -> None:
+        line = self._pending.strip()
+        self._pending = ""
+        if line:
+            self._on_line(line)
 
 
 class SidecarWorker:
@@ -59,6 +120,7 @@ class SidecarWorker:
         settings_service: Any | None = None,
         login_service: Any | None = None,
         output_service: Any | None = None,
+        command_runner: Any | None = None,
         output: TextIO | None = None,
     ):
         self.fetch_service = fetch_service or FetchService()
@@ -66,6 +128,7 @@ class SidecarWorker:
         self.settings_service = settings_service or (SettingsService() if SettingsService else None)
         self.login_service = login_service or LoginService()
         self.output_service = output_service or OutputService()
+        self.command_runner = command_runner or _default_command_runner
         self.output = output
         self.events: list[dict[str, Any]] = []
         self._tasks: dict[str, asyncio.Task] = {}
@@ -130,8 +193,14 @@ class SidecarWorker:
             self._handle_doctor(request_id, params)
         elif method == "settings_snapshot":
             self._emit_done(request_id, method, self._settings_snapshot())
+        elif method == "settings_schema":
+            self._emit_done(request_id, method, self._settings_schema())
+        elif method == "settings_update":
+            self._emit_done(request_id, method, self._settings_update(params))
         elif method == "login_status":
             self._emit_done(request_id, method, self._login_status(params))
+        elif method == "import_login_sessions":
+            self._emit_done(request_id, method, self._import_login_sessions(params))
         elif method == "output_list":
             self._emit_done(request_id, method, self._output_list())
         else:
@@ -148,12 +217,28 @@ class SidecarWorker:
         urls = params.get("urls")
         if isinstance(urls, str):
             urls = [urls]
+        if urls is None:
+            urls = []
         if not isinstance(urls, list) or not all(isinstance(url, str) for url in urls):
             self._emit_error(request_id, "invalid_params", "fetch params.urls must be a list of strings")
             return
 
         output_dir = params.get("output_dir") or params.get("outputDirectory") or ""
-        task = asyncio.create_task(self._run_fetch_job(request_id, urls, str(output_dir)))
+        targets = params.get("targets")
+        if isinstance(targets, str):
+            targets = [targets]
+        if targets is not None:
+            if not isinstance(targets, list) or not all(isinstance(target, str) for target in targets):
+                self._emit_error(request_id, "invalid_params", "fetch params.targets must be a list of strings")
+                return
+        if targets and not urls:
+            platform = str(params.get("platform") or "").strip().lower()
+            mode = str(params.get("mode") or "").strip().lower()
+            task = asyncio.create_task(
+                self._run_structured_fetch_job(request_id, targets, platform, mode, str(output_dir))
+            )
+        else:
+            task = asyncio.create_task(self._run_fetch_job(request_id, urls, str(output_dir)))
         self._tasks[request_id] = task
 
     async def _run_fetch_job(self, request_id: str, urls: list[str], output_dir: str = "") -> None:
@@ -161,10 +246,7 @@ class SidecarWorker:
         errors = 0
         try:
             async with self._fetch_lock:
-                previous_output_dir = os.environ.get("OUTPUT_DIR")
-                if output_dir:
-                    os.environ["OUTPUT_DIR"] = output_dir
-                try:
+                with _temporary_output_environment(output_dir):
                     self._emit(
                         {
                             "id": request_id,
@@ -215,12 +297,6 @@ class SidecarWorker:
                                     "artifact": artifact_payload,
                                 }
                             )
-                finally:
-                    if output_dir:
-                        if previous_output_dir is None:
-                            os.environ.pop("OUTPUT_DIR", None)
-                        else:
-                            os.environ["OUTPUT_DIR"] = previous_output_dir
 
             self._emit_done(request_id, "fetch", {"fetched": fetched, "errors": errors})
         except asyncio.CancelledError:
@@ -235,6 +311,161 @@ class SidecarWorker:
             raise
         finally:
             self._tasks.pop(request_id, None)
+
+    async def _run_structured_fetch_job(
+        self,
+        request_id: str,
+        targets: list[str],
+        platform: str,
+        mode: str,
+        output_dir: str = "",
+    ) -> None:
+        command_preview = ""
+        emitted_artifacts: set[str] = set()
+
+        def emit_stream_line(line: str) -> None:
+            self._emit(
+                {
+                    "id": request_id,
+                    "event": "log",
+                    "method": "fetch",
+                    "level": _log_level_for_line(line),
+                    "message": line,
+                }
+            )
+            for artifact_path in _extract_artifact_paths_from_command_output(line):
+                if artifact_path in emitted_artifacts:
+                    continue
+                emitted_artifacts.add(artifact_path)
+                self._emit_structured_artifact(request_id, artifact_path)
+
+        try:
+            command = _structured_command(platform, mode)
+            command_preview = _command_preview(command, targets)
+            if self._fetch_lock.locked():
+                self._emit(
+                    {
+                        "id": request_id,
+                        "event": "log",
+                        "method": "fetch",
+                        "level": "info",
+                        "message": f"任务已排队，等待前一个抓取任务完成：{command_preview}",
+                    }
+                )
+            async with self._fetch_lock:
+                with _temporary_output_environment(output_dir):
+                    self._emit(
+                        {
+                            "id": request_id,
+                            "event": "job_started",
+                            "method": "fetch",
+                            "result": {
+                                "total": 1,
+                                "platform": platform,
+                                "mode": mode,
+                                "command": command_preview,
+                            },
+                        }
+                    )
+                    self._emit(
+                        {
+                            "id": request_id,
+                            "event": "log",
+                            "method": "fetch",
+                            "level": "info",
+                            "message": f"正在执行：{command_preview}",
+                        }
+                    )
+                    stdout_text, stderr_text = await asyncio.to_thread(
+                        self._invoke_command_runner,
+                        command,
+                        targets,
+                        emit_stream_line,
+                    )
+                    log_lines = _split_log_lines(stdout_text, stderr_text)
+                    artifact_paths = _extract_artifact_paths_from_command_output(stdout_text, stderr_text)
+                    for artifact_path in artifact_paths:
+                        if artifact_path in emitted_artifacts:
+                            continue
+                        emitted_artifacts.add(artifact_path)
+                        self._emit_structured_artifact(request_id, artifact_path)
+                    no_output_error = _structured_no_output_error(command, log_lines, artifact_paths)
+                    if no_output_error:
+                        self._emit_error(
+                            request_id,
+                            "structured_no_output",
+                            no_output_error,
+                            recoverable=True,
+                        )
+                        self._emit_done(
+                            request_id,
+                            "fetch",
+                            {"fetched": 0, "errors": 1, "command": command_preview, "error": no_output_error},
+                        )
+                        return
+            self._emit_done(request_id, "fetch", {"fetched": 1, "errors": 0, "command": command_preview})
+        except asyncio.CancelledError:
+            self._emit(
+                {
+                    "id": request_id,
+                    "event": "cancelled",
+                    "method": "fetch",
+                    "result": {"cancelled": True},
+                }
+            )
+            raise
+        except StructuredCommandError as exc:
+            for line in _split_log_lines(exc.stdout_text, exc.stderr_text):
+                for artifact_path in _extract_artifact_paths_from_command_output(line):
+                    if artifact_path in emitted_artifacts:
+                        continue
+                    emitted_artifacts.add(artifact_path)
+                    self._emit_structured_artifact(request_id, artifact_path)
+            self._emit_exception(request_id, exc)
+            self._emit_done(
+                request_id,
+                "fetch",
+                {"fetched": 0, "errors": 1, "command": command_preview, "error": str(exc)},
+            )
+        except Exception as exc:
+            self._emit_exception(request_id, exc)
+            self._emit_done(
+                request_id,
+                "fetch",
+                {"fetched": 0, "errors": 1, "command": command_preview, "error": str(exc)},
+            )
+        finally:
+            self._tasks.pop(request_id, None)
+
+    def _invoke_command_runner(self, command: str, args: list[str], on_line=None) -> tuple[str, str]:
+        stdout = _StreamingCaptureTextIO(on_line) if on_line else _CaptureTextIO()
+        stderr = _StreamingCaptureTextIO(on_line) if on_line else _CaptureTextIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            _configure_command_logging(stderr)
+            try:
+                self.command_runner(command, list(args))
+            except SystemExit as exc:
+                code = exc.code if isinstance(exc.code, int) else 1
+                if code != 0:
+                    message = _last_error_line(stdout.getvalue(), stderr.getvalue()) or f"{command} exited with code {code}"
+                    raise StructuredCommandError(
+                        message,
+                        stdout_text=stdout.getvalue(),
+                        stderr_text=stderr.getvalue(),
+                    ) from exc
+            except Exception as exc:
+                raise StructuredCommandError(
+                    str(exc),
+                    stdout_text=stdout.getvalue(),
+                    stderr_text=stderr.getvalue(),
+                ) from exc
+            finally:
+                if isinstance(stdout, _StreamingCaptureTextIO):
+                    stdout.flush_pending()
+                if isinstance(stderr, _StreamingCaptureTextIO):
+                    stderr.flush_pending()
+                _configure_worker_logging()
+        return stdout.getvalue(), stderr.getvalue()
 
     async def _cancel_job(self, request_id: str | None, params: dict[str, Any]) -> None:
         target_id = str(params.get("id") or params.get("job_id") or "")
@@ -298,11 +529,70 @@ class SidecarWorker:
             "user_agent": self.settings_service.user_agent(),
         }
 
+    def _settings_schema(self) -> dict[str, Any]:
+        if self.settings_service is None:
+            return {"available": False}
+        schema = getattr(self.settings_service, "schema", None)
+        if callable(schema):
+            payload = _to_payload(schema())
+            snapshot = self._settings_snapshot()
+            item_values = {
+                str(item.get("name")): item.get("value")
+                for item in snapshot.get("items", [])
+                if isinstance(item, dict) and item.get("name")
+            }
+            if item_values.get("user_agent") and not item_values.get("BROWSER_USER_AGENT"):
+                item_values["BROWSER_USER_AGENT"] = item_values["user_agent"]
+            for platform in payload.get("platforms", []):
+                if not isinstance(platform, dict):
+                    continue
+                for field in platform.get("fields", []):
+                    if not isinstance(field, dict):
+                        continue
+                    name = str(field.get("name") or "")
+                    if name in item_values:
+                        field["value"] = _coerce_settings_schema_value(field, item_values[name])
+                    if "value" in field:
+                        field["value"] = _coerce_settings_schema_value(field, field.get("value"))
+                    if "default" in field:
+                        field["default"] = _coerce_settings_schema_value(field, field.get("default"))
+                    if "defaultValue" in field:
+                        field["defaultValue"] = _coerce_settings_schema_value(field, field.get("defaultValue"))
+            return payload
+        return {"available": False}
+
+    def _settings_update(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.settings_service is None:
+            return {"available": False}
+        values = params.get("values")
+        if values is None:
+            values = params.get("settings")
+        if not isinstance(values, dict):
+            raise ValueError("settings_update params.values must be an object")
+        update = getattr(self.settings_service, "update", None)
+        if callable(update):
+            return _to_payload(update(values))
+        return {"available": False}
+
     def _login_status(self, params: dict[str, Any]) -> dict[str, Any]:
         platforms = params.get("platforms") or []
         if isinstance(platforms, str):
             platforms = [platforms]
         return {"platforms": [_to_payload(self.login_service.status(str(platform))) for platform in platforms]}
+
+    def _import_login_sessions(self, params: dict[str, Any]) -> dict[str, Any]:
+        source_dir = params.get("source_dir") or params.get("installer_session_dir") or ""
+        if not isinstance(source_dir, str) or not source_dir:
+            raise ValueError("import_login_sessions params.source_dir is required")
+        overwrite = bool(params.get("overwrite", False))
+        sync = bool(params.get("sync", False))
+        import_sessions = getattr(self.login_service, "import_sessions", None)
+        if not callable(import_sessions):
+            return {"available": False}
+        platform = params.get("platform")
+        if isinstance(platform, str) and platform:
+            return _to_payload(import_sessions(source_dir, overwrite=overwrite, platform=platform, sync=sync))
+        return _to_payload(import_sessions(source_dir, overwrite=overwrite, sync=sync))
 
     def _output_list(self) -> dict[str, Any]:
         list_artifacts = getattr(self.output_service, "list_artifacts", None)
@@ -365,6 +655,18 @@ class SidecarWorker:
             url=url,
         )
 
+    def _emit_structured_artifact(self, request_id: str, artifact_path: str) -> None:
+        suffix = os.path.splitext(artifact_path)[1].lower()
+        kind = "markdown" if suffix == ".md" else suffix.lstrip(".") or "file"
+        self._emit(
+            {
+                "id": request_id,
+                "event": "artifact",
+                "method": "fetch",
+                "artifact": {"kind": kind, "path": artifact_path},
+            }
+        )
+
     def _emit(self, event: dict[str, Any]) -> None:
         payload = _json_safe(event)
         self.events.append(payload)
@@ -377,6 +679,159 @@ def _to_payload(value: Any) -> Any:
     if hasattr(value, "to_dict") and callable(value.to_dict):
         return value.to_dict()
     return value
+
+
+def _coerce_settings_schema_value(field: dict[str, Any], value: Any) -> Any:
+    field_type = str(field.get("type") or field.get("value_type") or "").lower()
+    if field_type in {"boolean", "bool"}:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off", ""}:
+                return False
+        return bool(value)
+    if field_type in {"integer", "int"}:
+        if value == "":
+            return value
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return value
+    if field_type == "number":
+        if value == "":
+            return value
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return value
+        return int(parsed) if parsed.is_integer() else parsed
+    return value
+
+
+def _structured_command(platform: str, mode: str) -> str:
+    command = _STRUCTURED_COMMANDS.get((platform, mode))
+    if command is None:
+        raise ValueError(f"unsupported structured fetch task: platform={platform or 'unset'} mode={mode or 'unset'}")
+    return command
+
+
+def _command_preview(command: str, args: list[str]) -> str:
+    return "feedgrab " + " ".join([command, *[_quote_cli_arg(arg) for arg in args]])
+
+
+def _quote_cli_arg(value: str) -> str:
+    if not value:
+        return '""'
+    if any(ch.isspace() or ch in {",", '"'} for ch in value):
+        return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return value
+
+
+@contextlib.contextmanager
+def _temporary_output_environment(output_dir: str):
+    if not output_dir:
+        yield
+        return
+
+    keys = ("OUTPUT_DIR", "OBSIDIAN_VAULT")
+    previous = {key: os.environ.get(key) for key in keys}
+    try:
+        for key in keys:
+            os.environ[key] = output_dir
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _split_log_lines(*chunks: str) -> list[str]:
+    lines: list[str] = []
+    for chunk in chunks:
+        for line in str(chunk or "").splitlines():
+            item = line.strip()
+            if item:
+                lines.append(item)
+    return lines
+
+
+def _extract_artifact_paths_from_command_output(*chunks: str) -> list[str]:
+    paths: list[str] = []
+    seen: set[str] = set()
+    for line in _split_log_lines(*chunks):
+        match = _ARTIFACT_PATH_LINE_RE.search(line)
+        if not match:
+            continue
+        path = match.group("path").strip().strip("'\"")
+        if path and path not in seen:
+            seen.add(path)
+            paths.append(path)
+    return paths
+
+
+def _structured_no_output_error(command: str, log_lines: list[str], artifact_paths: list[str]) -> str:
+    if command != "mpweixin-id" or artifact_paths:
+        return ""
+    if any(_ZERO_ACCOUNT_OUTPUT_RE.search(line) for line in log_lines):
+        return (
+            "微信公众号账号批量未生成任何文章，请检查公众号名称、MP 后台登录态，"
+            "或 MPWEIXIN_ID_SINCE 日期过滤。"
+        )
+    return ""
+
+
+def _last_error_line(*chunks: str) -> str:
+    for line in reversed(_split_log_lines(*chunks)):
+        if line.startswith("❌"):
+            return line.lstrip("❌ ").strip()
+    lines = _split_log_lines(*chunks)
+    return lines[-1] if lines else ""
+
+
+def _log_level_for_line(line: str) -> str:
+    lowered = line.lower()
+    if line.startswith("❌") or " error " in f" {lowered} " or lowered.startswith("error"):
+        return "error"
+    if " warning " in f" {lowered} " or lowered.startswith("warning") or "⚠" in line:
+        return "warning"
+    if line.startswith("✅") or "saved to markdown" in lowered:
+        return "success"
+    return "info"
+
+
+def _default_command_runner(command: str, args: list[str]) -> None:
+    from feedgrab import cli
+
+    if command == "x-so":
+        cli.cmd_twitter_search(args)
+        return
+    if command == "xhs-so":
+        cli.cmd_xhs_search(args)
+        return
+    if command == "ytb-so":
+        cli.cmd_youtube_search(args)
+        return
+    if command == "zhihu-so":
+        cli.cmd_zhihu_search(args)
+        return
+    if command == "mpweixin-id":
+        if not args:
+            raise ValueError("mpweixin-id requires an account name")
+        cli.cmd_mpweixin_account(args[0])
+        return
+    if command == "mpweixin-so":
+        if not args:
+            raise ValueError("mpweixin-so requires a keyword")
+        cli.cmd_wechat_search(args[0])
+        return
+    raise ValueError(f"unsupported command: {command}")
 
 
 def _json_safe(value: Any, *, key: str = "") -> Any:
@@ -416,12 +871,29 @@ async def _run_stdio(stdin: TextIO, stdout: TextIO) -> None:
 
 
 def main() -> None:
+    _configure_stdio_utf8()
+    if len(sys.argv) >= 3 and sys.argv[1] == "login":
+        _configure_worker_logging()
+        LoginService().login(sys.argv[2], headless=False)
+        return
     asyncio.run(_run_stdio(sys.stdin, sys.stdout))
+
+
+def _configure_stdio_utf8() -> None:
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
 
 
 def _configure_worker_logging() -> None:
     logger.remove()
     logger.add(_redacted_log_sink, level="INFO")
+
+
+def _configure_command_logging(sink) -> None:
+    logger.remove()
+    logger.add(sink, level=os.getenv("LOG_LEVEL", "INFO"))
 
 
 def _redacted_log_sink(message) -> None:

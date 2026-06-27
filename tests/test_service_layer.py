@@ -158,6 +158,78 @@ def test_cli_fetch_reports_batch_failures_without_crashing(monkeypatch, capsys):
     assert "Fetched 1/2 URLs" in out
 
 
+def test_cli_twitter_search_exits_when_all_batch_keywords_fail(monkeypatch, capsys):
+    import feedgrab.cli as cli
+    import feedgrab.config as config
+    import feedgrab.fetchers.twitter_keyword_search as search_module
+
+    monkeypatch.setattr(config, "x_search_enabled", lambda: True)
+    monkeypatch.setattr(config, "x_search_lang", lambda: "")
+    monkeypatch.setattr(config, "x_search_days", lambda: 1)
+    monkeypatch.setattr(config, "x_search_min_faves", lambda: 0)
+    monkeypatch.setattr(config, "x_search_min_retweets", lambda: 0)
+    monkeypatch.setattr(config, "x_search_sort", lambda: "live")
+    monkeypatch.setattr(config, "x_search_exclude_retweets", lambda: True)
+    monkeypatch.setattr(config, "x_search_delay", lambda: 0)
+    monkeypatch.setattr(config, "x_search_max_results", lambda: 10)
+    monkeypatch.setattr(config, "x_search_save_tweets", lambda: False)
+    monkeypatch.setattr(config, "x_search_merge_keywords", lambda: True)
+
+    async def failing_search(**_kwargs):
+        raise RuntimeError("missing Twitter login")
+
+    monkeypatch.setattr(search_module, "search_twitter_keyword", failing_search)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.cmd_twitter_search(["alpha,beta"])
+
+    assert exc.value.code == 1
+    out = capsys.readouterr().out
+    assert "❌ [alpha] missing Twitter login" in out
+    assert "❌ [beta] missing Twitter login" in out
+    assert "❌ X search failed for all keywords: alpha, beta" in out
+
+
+def test_cli_twitter_search_merge_writes_empty_summary(monkeypatch, tmp_path, capsys):
+    import feedgrab.cli as cli
+    import feedgrab.config as config
+    import feedgrab.fetchers.twitter_keyword_search as search_module
+
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+    monkeypatch.delenv("OBSIDIAN_VAULT", raising=False)
+    monkeypatch.setattr(config, "x_search_enabled", lambda: True)
+    monkeypatch.setattr(config, "x_search_lang", lambda: "")
+    monkeypatch.setattr(config, "x_search_days", lambda: 1)
+    monkeypatch.setattr(config, "x_search_min_faves", lambda: 0)
+    monkeypatch.setattr(config, "x_search_min_retweets", lambda: 0)
+    monkeypatch.setattr(config, "x_search_sort", lambda: "live")
+    monkeypatch.setattr(config, "x_search_exclude_retweets", lambda: True)
+    monkeypatch.setattr(config, "x_search_delay", lambda: 0)
+    monkeypatch.setattr(config, "x_search_max_results", lambda: 10)
+    monkeypatch.setattr(config, "x_search_save_tweets", lambda: False)
+    monkeypatch.setattr(config, "x_search_merge_keywords", lambda: True)
+
+    async def empty_search(**kwargs):
+        return {
+            "total": 0,
+            "saved": 0,
+            "query": kwargs["keyword"],
+            "output_path": "",
+            "csv_path": "",
+            "tweets": [],
+        }
+
+    monkeypatch.setattr(search_module, "search_twitter_keyword", empty_search)
+
+    cli.cmd_twitter_search(["alpha,beta"])
+
+    out = capsys.readouterr().out
+    assert "Merged summary:" in out
+    merged_files = list(tmp_path.glob("X/search/1day_new/alpha+beta_*.md"))
+    assert len(merged_files) == 1
+    assert "*No results found.*" in merged_files[0].read_text(encoding="utf-8")
+
+
 def test_mcp_read_url_uses_fetch_service(monkeypatch):
     _install_fake_mcp(monkeypatch)
 

@@ -61,6 +61,15 @@ def _redact_url(value: str) -> str:
         return value
     if not parts.scheme or not parts.netloc:
         return value
+    netloc = parts.netloc
+    if parts.password is not None:
+        host = parts.hostname or ""
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        if parts.port is not None:
+            host = f"{host}:{parts.port}"
+        username = parts.username or ""
+        netloc = f"{username}:[redacted]@{host}" if username else f"[redacted]@{host}"
     query = []
     changed = False
     for key, item in parse_qsl(parts.query, keep_blank_values=True):
@@ -69,9 +78,9 @@ def _redact_url(value: str) -> str:
             changed = True
         else:
             query.append((key, item))
-    if not changed:
+    if not changed and netloc == parts.netloc:
         return value
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+    return urlunsplit((parts.scheme, netloc, parts.path, urlencode(query), parts.fragment))
 
 
 def _redact_string(value: str) -> str:

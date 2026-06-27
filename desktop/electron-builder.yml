@@ -10,8 +10,16 @@ files:
 extraResources:
   - from: runtime/feedgrab-runtime
     to: feedgrab-runtime
+  - from: ../docs/feedgrab-icons/windows/app.ico
+    to: app.ico
+  - from: ../docs/feedgrab-icons/windows/Square44x44Logo.png
+    to: Square44x44Logo.png
+extraFiles:
+  - from: session-templates
+    to: sessions
 asar: true
 win:
+  icon: ../docs/feedgrab-icons/windows/app.ico
   target:
     - target: nsis
       arch:

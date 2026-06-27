@@ -13,6 +13,8 @@ Raises requests-compatible exceptions for backward compatibility.
 import requests as _requests_lib  # always available (core dep)
 from loguru import logger
 
+from feedgrab.service.proxy import get_requests_proxy_config
+
 _engine = None   # "curl_cffi" or "requests"
 _session = None  # persistent session
 
@@ -46,6 +48,16 @@ def _raise_compat(e):
     raise _requests_lib.RequestException(str(e)) from e
 
 
+def _with_proxy_kwargs(kwargs):
+    if "proxies" in kwargs:
+        return kwargs
+    proxies = get_requests_proxy_config()
+    if proxies:
+        kwargs = dict(kwargs)
+        kwargs["proxies"] = proxies
+    return kwargs
+
+
 def get(url, **kwargs):
     """HTTP GET with TLS fingerprint impersonation.
 
@@ -53,6 +65,7 @@ def get(url, **kwargs):
     Returns a requests-compatible Response object.
     """
     _ensure_session()
+    kwargs = _with_proxy_kwargs(kwargs)
     try:
         return _session.get(url, **kwargs)
     except _requests_lib.RequestException:
@@ -64,6 +77,7 @@ def get(url, **kwargs):
 def post(url, **kwargs):
     """HTTP POST with TLS fingerprint impersonation."""
     _ensure_session()
+    kwargs = _with_proxy_kwargs(kwargs)
     try:
         return _session.post(url, **kwargs)
     except _requests_lib.RequestException:

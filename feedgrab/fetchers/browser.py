@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from feedgrab.config import get_session_dir, get_user_agent
+from feedgrab.service.proxy import get_playwright_proxy_options, redact_proxy_url
 
 SESSION_DIR = get_session_dir()
 TIMEOUT_MS = 30_000
@@ -140,12 +141,19 @@ async def stealth_launch(p, *, headless=True):
     patchright's CDP patches still apply at the protocol level.
     """
     engine = get_stealth_engine_name()
-    logger.debug(f"Launching browser [{engine}] headless={headless}")
+    proxy_options = get_playwright_proxy_options()
+    proxy_label = redact_proxy_url(proxy_options.get("server", "")) if proxy_options else ""
+    logger.debug(f"Launching browser [{engine}] headless={headless} proxy={bool(proxy_options)} {proxy_label}")
+    launch_options = {
+        "headless": headless,
+        "channel": "chrome",
+        "args": STEALTH_LAUNCH_ARGS,
+        "ignore_default_args": HARMFUL_DEFAULT_ARGS,
+    }
+    if proxy_options:
+        launch_options["proxy"] = proxy_options
     return await p.chromium.launch(
-        headless=headless,
-        channel="chrome",
-        args=STEALTH_LAUNCH_ARGS,
-        ignore_default_args=HARMFUL_DEFAULT_ARGS,
+        **launch_options,
     )
 
 
@@ -166,6 +174,9 @@ def get_stealth_context_options(**overrides) -> dict:
         "has_touch": False,
         "ignore_https_errors": True,
     }
+    proxy_options = get_playwright_proxy_options()
+    if proxy_options and "proxy" not in overrides:
+        opts["proxy"] = proxy_options
     opts.update(overrides)
     return opts
 

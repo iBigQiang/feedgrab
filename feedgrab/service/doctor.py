@@ -4,10 +4,21 @@
 from __future__ import annotations
 
 import sys
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from feedgrab.config import get_data_dir
 from feedgrab.service.models import DiagnosticResult
+from feedgrab.service.proxy import get_proxy_url, is_proxy_enabled, redact_proxy_url
+from feedgrab.utils import http_client
+
+
+_PROXY_TEST_TARGETS = (
+    "https://raw.githubusercontent.com/github/gitignore/main/Python.gitignore",
+    "https://x.com",
+    "https://www.youtube.com",
+)
 
 
 @dataclass
@@ -54,27 +65,81 @@ class DoctorService:
         ]
         for module_name in optional_modules or []:
             checks.append(self.check_import(module_name, label=f"import:{module_name}"))
-        if self.output_dir is not None:
-            checks.append(self.check_output_dir(self.output_dir))
+        output_dir = self.output_dir or Path(os.getenv("OUTPUT_DIR", "./output"))
+        checks.append(self.check_directory("output_dir", output_dir, "output directory"))
+        checks.append(self.check_directory("data_dir", get_data_dir(), "data/session directory"))
+        checks.append(self.check_proxy_connectivity())
         return DiagnosticSummary(checks=checks)
 
     def check_output_dir(self, output_dir: str | Path) -> DiagnosticResult:
-        path = Path(output_dir)
+        return self.check_directory("output_dir", output_dir, "output directory")
+
+    def check_directory(self, name: str, directory: str | Path, label: str) -> DiagnosticResult:
+        path = Path(directory)
         try:
             path.mkdir(parents=True, exist_ok=True)
             probe = path / ".feedgrab_doctor_write_test"
             probe.write_text("ok", encoding="utf-8")
             probe.unlink()
             return DiagnosticResult(
-                name="output_dir",
+                name=name,
                 status="ok",
                 message="writable",
-                details={"path": str(path)},
+                details={"path": str(path), "label": label},
             )
         except Exception as exc:
             return DiagnosticResult(
-                name="output_dir",
+                name=name,
                 status="error",
                 message=str(exc),
-                details={"path": str(path)},
+                details={"path": str(path), "label": label},
             )
+
+    def check_proxy_connectivity(self) -> DiagnosticResult:
+        if not is_proxy_enabled():
+            return DiagnosticResult(
+                name="proxy_connectivity",
+                status="warning",
+                message="代理未启用",
+                details={"enabled": False},
+            )
+
+        proxy_url = get_proxy_url()
+        if not proxy_url:
+            return DiagnosticResult(
+                name="proxy_connectivity",
+                status="warning",
+                message="代理未配置",
+                details={"enabled": True},
+            )
+
+        last_error = ""
+        for target in _PROXY_TEST_TARGETS:
+            try:
+                response = http_client.get(target, timeout=6)
+                status_code = getattr(response, "status_code", 0)
+                if 200 <= int(status_code) < 500:
+                    return DiagnosticResult(
+                        name="proxy_connectivity",
+                        status="ok",
+                        message="代理连通",
+                        details={"target": target, "status_code": status_code, "proxy": redact_proxy_url(proxy_url)},
+                    )
+                last_error = f"HTTP {status_code}"
+            except Exception as exc:
+                text = str(exc)
+                lowered = text.lower()
+                if "timeout" in lowered or "timed out" in lowered:
+                    last_error = "网络超时"
+                elif "proxy" in lowered or "connect" in lowered or "connection" in lowered:
+                    last_error = "代理不可达"
+                else:
+                    last_error = text
+
+        message = last_error if last_error in {"网络超时", "代理不可达"} else f"代理检测失败：{last_error}"
+        return DiagnosticResult(
+            name="proxy_connectivity",
+            status="error",
+            message=message,
+            details={"enabled": True, "proxy": redact_proxy_url(proxy_url)},
+        )

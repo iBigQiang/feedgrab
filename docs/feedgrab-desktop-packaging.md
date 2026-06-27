@@ -10,11 +10,36 @@
 | 普通用户版安装器 `.exe` | `npm run pack:user` | NSIS 安装器，创建开始菜单和桌面快捷方式 |
 | 同时构建两个版本 | `npm run pack:all` | 一次生成 portable 和安装器 |
 
+## 当前预览发布
+
+本次阶段性安装包只发布普通用户版 NSIS 安装器，文件作为 GitHub Release asset 上传，不提交到源码分支：
+
+| 项 | 值 |
+|---|---|
+| Release tag | `desktop-v0.1.0-20260627` |
+| 发布页 | <https://github.com/iBigQiang/feedgrab/releases/tag/desktop-v0.1.0-20260627> |
+| 下载地址 | <https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.0-20260627/feedgrab-desktop-setup-0.1.0.exe> |
+| 本地构建目录 | `D:\AiCode\feedgrab\desktop\release-packages\20260627-215707\` |
+| 本地原始文件名 | `feedgrab Desktop Setup 0.1.0.exe` |
+| Release asset 文件名 | `feedgrab-desktop-setup-0.1.0.exe` |
+| 文件大小 | `384214024` bytes |
+| 打包时间 | `2026-06-27 21:58:01 +08:00` |
+| SHA256 | `B66642BE164F94C9E6959082467AD4158327ADA9E836617B7BA729F9629E72B2` |
+| 签名状态 | 未签名 |
+
+发布 Release 时必须指定 `--target feedgrab-desktop`，避免 tag 指向 `main`。
+
 两个版本都会先构建 `feedgrab-runtime`，包含：
 
 - `feedgrab-worker.exe`：由 PyInstaller 从 `feedgrab/worker.py` 冻结生成。
 - `ms-playwright/`：Playwright Chromium 浏览器目录。
 - runtime 环境变量：Electron main 会把 `PLAYWRIGHT_BROWSERS_PATH` 指向内置或托管 Chromium 目录。
+
+安装包还会把 `desktop/session-templates/` 复制到安装根目录的 `sessions/`：
+
+- 这些 JSON 文件只允许保存空白模板，不提交真实 Cookie、Token 或浏览器登录态。
+- 安装后用户可在 `安装目录\sessions\` 手动填写模板，或通过客户端登录流程生成真实登录态。
+- GUI 导入逻辑会忽略空白模板，只有填入真实值后才会被当作可导入 session。
 
 ## 本地打包
 
@@ -77,6 +102,18 @@ resources/feedgrab-runtime/ms-playwright/
 ```
 
 如果内置 Chromium 不存在，runtime resolver 会把 `PLAYWRIGHT_BROWSERS_PATH` 指向用户数据目录下的托管位置，供后续首次自检修复流程使用。
+
+安装版登录态导入来源：
+
+```text
+安装目录\sessions\
+```
+
+开发版登录态导入来源：
+
+```text
+D:\AiCode\feedgrab\desktop\sessions\
+```
 
 ## 验证
 
