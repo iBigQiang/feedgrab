@@ -1,13 +1,13 @@
 
 <div align="center">
-
+  
 ### 🌐 官方仓库：**[https://github.com/iBigQiang/feedgrab](https://edgeone.gh-proxy.com/https://github.com/iBigQiang/feedgrab/tree/feedgrab-desktop)**
 
 </div>
 
 ---
 
-## ❤️ feedgrab Desktop 赞助商
+## ❤️ feedgrab Desktop 赞助商 
 
 > [想出现在这里？](mailto:ibigqiang@gmail.com)
 
