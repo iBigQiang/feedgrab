@@ -1,4 +1,4 @@
-## ❤️ feedgrab Desktop 赞助商 
+## ❤️ 赞助商 
 
 > [想出现在这里？](mailto:ibigqiang@gmail.com)
 
