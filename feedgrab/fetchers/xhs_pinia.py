@@ -222,11 +222,11 @@ async def _connect_xhs_cdp():
             await pw.stop()
             return None, None, None, False
 
-        logger.info(f"[XHS-Pinia] CDP connected, {len(await target_ctx.cookies())} cookies")
+        logger.info(f"[XHS-Pinia] CDP 已连接，{len(await target_ctx.cookies())} 个 Cookie")
         return pw, browser, target_ctx, True
 
     except Exception as e:
-        logger.debug(f"[XHS-Pinia] CDP connection failed: {e}")
+        logger.debug(f"[XHS-Pinia] CDP 连接失败：{e}")
         try:
             await pw.stop()
         except Exception:
@@ -258,7 +258,7 @@ async def _get_xhs_pinia_page():
             await page.wait_for_timeout(2000)
             return pw, browser, page, True
         except Exception as e:
-            logger.warning(f"[XHS-Pinia] CDP navigate failed: {e}")
+            logger.warning(f"[XHS-Pinia] CDP 页面导航失败：{e}")
             try:
                 await page.close()
             except Exception:
@@ -278,7 +278,7 @@ async def _get_xhs_pinia_page():
 
     session_path = get_session_path("xhs")
     if not Path(session_path).exists():
-        logger.debug("[XHS-Pinia] No XHS session file, cannot launch browser")
+        logger.debug("[XHS-Pinia] 未找到小红书登录态文件，无法启动浏览器")
         return None, None, None, False
 
     try:
@@ -300,11 +300,11 @@ async def _get_xhs_pinia_page():
         await page.goto("https://www.xiaohongshu.com/explore",
                         wait_until="domcontentloaded", timeout=15000)
         await page.wait_for_timeout(2000)
-        logger.info("[XHS-Pinia] Browser launched, navigated to explore")
+        logger.info("[XHS-Pinia] 浏览器已启动并进入 explore 页面")
         return pw, browser, page, False
 
     except Exception as e:
-        logger.warning(f"[XHS-Pinia] Browser launch failed: {e}")
+        logger.warning(f"[XHS-Pinia] 浏览器启动失败：{e}")
         try:
             if 'browser' in dir() and browser:
                 await browser.close()
@@ -355,36 +355,36 @@ async def pinia_feed_note(note_id: str) -> Optional[dict]:
         # Check Pinia availability
         check = await page.evaluate(PINIA_CHECK_JS)
         if not check or not check.get("available"):
-            logger.warning(f"[XHS-Pinia] Pinia not available: {check}")
+            logger.warning(f"[XHS-Pinia] Pinia 不可用：{check}")
             return None
         logger.debug(f"[XHS-Pinia] Stores: {check.get('stores', [])}")
 
         # Execute feed note
         result = await page.evaluate(PINIA_FEED_NOTE_JS, note_id)
         if not result or not result.get("ok"):
-            logger.warning(f"[XHS-Pinia] Feed note failed: {result}")
+            logger.warning(f"[XHS-Pinia] 笔记接口调用失败：{result}")
             return None
 
         # Extract note_card from API response
         raw = result["data"]
         items = raw.get("data", {}).get("items", [])
         if not items:
-            logger.warning("[XHS-Pinia] Empty items in feed response")
+            logger.warning("[XHS-Pinia] 笔记接口返回空列表")
             return None
 
         note_card = items[0].get("note_card")
         if not note_card:
-            logger.warning("[XHS-Pinia] No note_card in first item")
+            logger.warning("[XHS-Pinia] 首条结果中没有 note_card")
             return None
 
         # Normalize using existing xhs_api function
         from feedgrab.fetchers.xhs_api import normalize_api_note
         data = normalize_api_note(note_card, note_id)
-        logger.info(f"[XHS-Pinia] Feed note success: {data.get('title', '')[:40]}")
+        logger.info(f"[XHS-Pinia] 笔记抓取成功：{data.get('title', '')[:40]}")
         return data
 
     except Exception as e:
-        logger.warning(f"[XHS-Pinia] Feed note error: {e}")
+        logger.warning(f"[XHS-Pinia] 笔记抓取异常：{e}")
         return None
 
     finally:
@@ -403,18 +403,18 @@ async def pinia_search_notes(keyword: str) -> Optional[list[dict]]:
     try:
         check = await page.evaluate(PINIA_CHECK_JS)
         if not check or not check.get("available"):
-            logger.warning(f"[XHS-Pinia] Pinia not available: {check}")
+            logger.warning(f"[XHS-Pinia] Pinia 不可用：{check}")
             return None
 
         result = await page.evaluate(PINIA_SEARCH_JS, keyword)
         if not result or not result.get("ok"):
-            logger.warning(f"[XHS-Pinia] Search failed: {result}")
+            logger.warning(f"[XHS-Pinia] 搜索失败：{result}")
             return None
 
         raw = result["data"]
         items = raw.get("data", {}).get("items", [])
         if not items:
-            logger.warning("[XHS-Pinia] Empty search results")
+            logger.warning("[XHS-Pinia] 搜索结果为空")
             return None
 
         from feedgrab.fetchers.xhs_api import normalize_search_item
@@ -427,11 +427,11 @@ async def pinia_search_notes(keyword: str) -> Optional[list[dict]]:
             except Exception:
                 continue
 
-        logger.info(f"[XHS-Pinia] Search '{keyword}': {len(results)} results")
+        logger.info(f"[XHS-Pinia] 搜索 '{keyword}'：{len(results)} 条结果")
         return results if results else None
 
     except Exception as e:
-        logger.warning(f"[XHS-Pinia] Search error: {e}")
+        logger.warning(f"[XHS-Pinia] 搜索异常：{e}")
         return None
 
     finally:
@@ -450,18 +450,18 @@ async def pinia_user_notes(user_id: str) -> Optional[list[dict]]:
     try:
         check = await page.evaluate(PINIA_CHECK_JS)
         if not check or not check.get("available"):
-            logger.warning(f"[XHS-Pinia] Pinia not available: {check}")
+            logger.warning(f"[XHS-Pinia] Pinia 不可用：{check}")
             return None
 
         result = await page.evaluate(PINIA_USER_NOTES_JS, user_id)
         if not result or not result.get("ok"):
-            logger.warning(f"[XHS-Pinia] User notes failed: {result}")
+            logger.warning(f"[XHS-Pinia] 用户笔记接口调用失败：{result}")
             return None
 
         raw = result["data"]
         notes = raw.get("data", {}).get("notes", [])
         if not notes:
-            logger.warning("[XHS-Pinia] Empty user notes")
+            logger.warning("[XHS-Pinia] 用户笔记为空")
             return None
 
         from feedgrab.fetchers.xhs_api import normalize_user_note_item
@@ -472,11 +472,11 @@ async def pinia_user_notes(user_id: str) -> Optional[list[dict]]:
             except Exception:
                 continue
 
-        logger.info(f"[XHS-Pinia] User {user_id}: {len(results)} notes")
+        logger.info(f"[XHS-Pinia] 用户 {user_id}：{len(results)} 篇笔记")
         return results if results else None
 
     except Exception as e:
-        logger.warning(f"[XHS-Pinia] User notes error: {e}")
+        logger.warning(f"[XHS-Pinia] 用户笔记抓取异常：{e}")
         return None
 
     finally:

@@ -29,6 +29,7 @@
 | 在线核验 | GitHub API `browser_download_url` 与上方下载地址一致，`curl.exe -I -L` 最终返回 `200 OK` |
 
 发布 Release 时必须指定 `--target feedgrab-desktop`，避免 tag 指向 `main`。
+发布文档更新后，`feedgrab-desktop` 分支根目录 `README.md` 必须与 `desktop/README.md` 保持全文一致，确保 GitHub 打开桌面分支时默认展示客户端说明。
 
 两个版本都会先构建 `feedgrab-runtime`，包含：
 
@@ -36,11 +37,14 @@
 - `ms-playwright/`：Playwright Chromium 浏览器目录。
 - runtime 环境变量：Electron main 会把 `PLAYWRIGHT_BROWSERS_PATH` 指向内置或托管 Chromium 目录。
 
-安装包还会把 `desktop/session-templates/` 复制到安装根目录的 `sessions/`：
+安装包会把 `desktop/session-templates/` 打包到安装资源目录 `resources/session-templates/`（只读资源）：
 
 - 这些 JSON 文件只允许保存空白模板，不提交真实 Cookie、Token 或浏览器登录态。
-- 安装后用户可在 `安装目录\sessions\` 手动填写模板，或通过客户端登录流程生成真实登录态。
+- 安装版启动时会把模板补齐到 `FEEDGRAB_DATA_DIR`，同名文件自动跳过，避免覆盖用户已有登录态文件。
+- 默认安装版首次会把 `FEEDGRAB_DATA_DIR` 指向 `安装目录\sessions\`；用户可手动更改到其他目录。
 - GUI 导入逻辑会忽略空白模板，只有填入真实值后才会被当作可导入 session。
+
+卸载器会在普通卸载时询问是否保留 `output` 与 `sessions`。静默卸载、升级卸载默认保留。保留模式会原地保留安装目录中的 `output` 与 `sessions`，并保留安装目录父路径结构；重新安装到同一路径时，同名登录态和输出文件会跳过，不会被空白模板覆盖。
 
 ## 本地打包
 
@@ -104,7 +108,7 @@ resources/feedgrab-runtime/ms-playwright/
 
 如果内置 Chromium 不存在，runtime resolver 会把 `PLAYWRIGHT_BROWSERS_PATH` 指向用户数据目录下的托管位置，供后续首次自检修复流程使用。
 
-安装版登录态导入来源：
+安装版默认登录态目录和导入来源：
 
 ```text
 安装目录\sessions\

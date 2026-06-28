@@ -178,7 +178,7 @@ def _extract_cookies_from_session() -> dict[str, str]:
 
     session_path = get_data_dir() / "xhs.json"
     if not session_path.exists():
-        raise FileNotFoundError(f"XHS session not found: {session_path}")
+        raise FileNotFoundError(f"未找到小红书登录态：{session_path}。请运行：feedgrab login xhs")
 
     data = json.loads(session_path.read_text(encoding="utf-8"))
     cookies: dict[str, str] = {}
@@ -188,7 +188,7 @@ def _extract_cookies_from_session() -> dict[str, str]:
             cookies[c["name"]] = c["value"]
 
     if "a1" not in cookies:
-        raise ValueError("XHS session missing 'a1' cookie — run: feedgrab login xhs")
+        raise ValueError("小红书登录态缺少关键 Cookie a1，请运行：feedgrab login xhs")
 
     return cookies
 
@@ -427,20 +427,20 @@ class XhsApiClient:
         try:
             data = json.loads(text)
         except json.JSONDecodeError:
-            raise XhsApiError(f"Non-JSON response: {text[:200]}")
+            raise XhsApiError(f"接口返回非 JSON 内容：{text[:200]}")
 
         if data.get("success"):
             return data.get("data", data.get("success"))
 
         code = data.get("code")
         if code == -100:
-            raise XhsSessionExpiredError("XHS session expired")
+            raise XhsSessionExpiredError("小红书登录态已过期")
         if code == 300012:
-            raise XhsApiError("IP blocked by XHS")
+            raise XhsApiError("当前 IP 被小红书限制")
         if code == 300015:
-            raise XhsApiError("Signature error")
+            raise XhsApiError("小红书签名错误")
 
-        raise XhsApiError(f"API error (code={code}): {json.dumps(data)[:200]}")
+        raise XhsApiError(f"小红书 API 错误（code={code}）：{json.dumps(data)[:200]}")
 
     # --- Request with retry ---
 
@@ -460,10 +460,10 @@ class XhsApiClient:
 
                 if resp.status_code in (429, 500, 502, 503, 504):
                     wait = (2**attempt) + random.uniform(0, 1)
-                    logger.warning(
-                        f"[XHS-API] HTTP {resp.status_code}, "
-                        f"retry in {wait:.1f}s ({attempt + 1}/{self._max_retries})"
-                    )
+                logger.warning(
+                    f"[XHS-API] HTTP {resp.status_code}, "
+                    f"{wait:.1f}s 后重试（{attempt + 1}/{self._max_retries}）"
+                )
                     time.sleep(wait)
                     continue
                 return self._handle_response(resp)
@@ -473,16 +473,16 @@ class XhsApiClient:
                 last_exc = exc
                 wait = (2**attempt) + random.uniform(0, 1)
                 logger.warning(
-                    f"[XHS-API] Network error: {exc}, "
-                    f"retry in {wait:.1f}s ({attempt + 1}/{self._max_retries})"
+                    f"[XHS-API] 网络错误：{exc}，"
+                    f"{wait:.1f}s 后重试（{attempt + 1}/{self._max_retries}）"
                 )
                 time.sleep(wait)
 
         if last_exc:
             raise XhsApiError(
-                f"Request failed after {self._max_retries} retries: {last_exc}"
+                f"请求重试 {self._max_retries} 次后仍失败：{last_exc}"
             )
-        raise XhsApiError(f"Request failed after {self._max_retries} retries")
+        raise XhsApiError(f"请求重试 {self._max_retries} 次后仍失败")
 
     # --- Signed API calls ---
 

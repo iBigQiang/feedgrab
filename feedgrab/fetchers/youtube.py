@@ -466,10 +466,10 @@ def _get_subtitles_via_ytdlp(url: str, lang: str = "en") -> List[Dict]:
         try:
             subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         except FileNotFoundError:
-            logger.warning("yt-dlp not found. Install with: pip install yt-dlp")
+            logger.warning("未找到 yt-dlp。请安装：pip install yt-dlp")
             return []
         except subprocess.TimeoutExpired:
-            logger.warning("yt-dlp subtitle download timed out")
+            logger.warning("yt-dlp 字幕下载超时")
             return []
 
         for ext in [f".{lang}.srt", f".{lang}.vtt"]:
@@ -571,7 +571,7 @@ def _whisper_single(audio_path: str, api_key: str, model: str, lang: str) -> Lis
             for seg in segments if seg.get("text", "").strip()
         ]
     except Exception as e:
-        logger.warning(f"Whisper transcription failed: {e}")
+        logger.warning(f"Whisper 转录失败：{e}")
         return []
 
 
@@ -594,7 +594,7 @@ def _whisper_chunked(
         )
         total_duration = float(probe.stdout.strip())
     except Exception:
-        logger.warning("ffprobe failed, cannot determine audio duration for chunking")
+        logger.warning("ffprobe 执行失败，无法确定音频时长并切分")
         return []
 
     # Generate chunk boundaries
@@ -605,8 +605,8 @@ def _whisper_chunked(
         chunks.append((start, end))
         start += chunk_secs - overlap_secs  # overlap with previous chunk
 
-    logger.info(f"Splitting {total_duration:.0f}s audio into {len(chunks)} chunks "
-                f"({chunk_secs}s each, {overlap_secs}s overlap)")
+    logger.info(f"正在将 {total_duration:.0f}s 音频切分为 {len(chunks)} 段"
+                f"（每段 {chunk_secs}s，重叠 {overlap_secs}s）")
 
     all_snippets: List[Dict] = []
     prev_end = 0.0  # track where previous chunk's content ends
@@ -622,13 +622,13 @@ def _whisper_chunked(
                 capture_output=True, timeout=30,
             )
         except Exception as e:
-            logger.warning(f"ffmpeg chunk {i} failed: {e}")
+            logger.warning(f"ffmpeg 切分第 {i} 段失败：{e}")
             continue
 
         if not os.path.exists(chunk_path):
             continue
 
-        logger.info(f"  Chunk {i + 1}/{len(chunks)}: {c_start:.0f}s-{c_end:.0f}s "
+        logger.info(f"  音频片段 {i + 1}/{len(chunks)}：{c_start:.0f}s-{c_end:.0f}s "
                      f"({os.path.getsize(chunk_path) // 1024}KB)")
 
         segments = _whisper_single(chunk_path, api_key, model, lang)
@@ -663,7 +663,7 @@ def _transcribe_via_whisper(url: str) -> List[Dict]:
     """
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
-        logger.info("GROQ_API_KEY not set, skipping Whisper transcription")
+        logger.info("未设置 GROQ_API_KEY，跳过 Whisper 转录")
         return []
 
     from feedgrab.config import groq_whisper_model, youtube_whisper_lang
@@ -706,16 +706,16 @@ def _transcribe_via_whisper(url: str) -> List[Dict]:
                 if cookie_args and cmd is attempts[0]:
                     stderr = result.stderr or ""
                     if "cookie" in stderr.lower() or result.returncode != 0:
-                        logger.info("[Whisper] Cookie extraction failed, retrying without cookies...")
+                        logger.info("[Whisper] Cookie 提取失败，改为不带 Cookie 重试...")
             except FileNotFoundError:
-                logger.warning("yt-dlp not found for audio download")
+                logger.warning("未找到 yt-dlp，无法下载音频")
                 return []
             except subprocess.TimeoutExpired:
-                logger.warning("yt-dlp audio download timed out")
+                logger.warning("yt-dlp 音频下载超时")
                 return []
 
         if not downloaded:
-            logger.warning("No audio file downloaded")
+            logger.warning("没有下载到音频文件")
             return []
 
         # Find the downloaded audio file
@@ -726,7 +726,7 @@ def _transcribe_via_whisper(url: str) -> List[Dict]:
                     audio_path = os.path.join(tmpdir, f)
                     break
             else:
-                logger.warning("No audio file downloaded")
+                logger.warning("没有下载到音频文件")
                 return []
 
         file_size = os.path.getsize(audio_path)

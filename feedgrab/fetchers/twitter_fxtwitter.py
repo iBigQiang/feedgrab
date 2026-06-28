@@ -314,6 +314,8 @@ def fetch_via_fxtwitter(url: str, tweet_id: str) -> Dict[str, Any]:
         display_title = article.get("title", "")
     if not display_title:
         display_title = text
+    from feedgrab.fetchers.twitter import _clean_title
+    title = _clean_title(display_title)
 
     # Build tweet_data for thread_tweets compatibility
     tweet_data = {
@@ -333,7 +335,7 @@ def fetch_via_fxtwitter(url: str, tweet_id: str) -> Dict[str, Any]:
         "author": f"@{screen_name}" if screen_name else "",
         "author_name": author_obj.get("name", ""),
         "url": url,
-        "title": display_title,
+        "title": title,
         "platform": "twitter",
         "thread_tweets": [tweet_data],
         "has_thread": False,

@@ -28,8 +28,8 @@ def _get_api_key() -> str:
     key = os.getenv("YOUTUBE_API_KEY", "").strip()
     if not key:
         raise RuntimeError(
-            "YOUTUBE_API_KEY not set. "
-            "Get one free at Google Cloud Console → YouTube Data API v3."
+            "未设置 YOUTUBE_API_KEY。"
+            "请在 Google Cloud Console 开通 YouTube Data API v3 后写入该配置。"
         )
     return key
 
@@ -289,7 +289,7 @@ def youtube_search(
     ]
 
     if not video_ids:
-        logger.warning("[YouTube] No results found")
+        logger.warning("[YouTube] 未找到结果")
         return []
 
     # Phase 2: Video details (1 quota unit)
@@ -401,10 +401,10 @@ def download_video(
             logger.warning(f"[YouTube] yt-dlp error: {result.stderr[:200]}")
             return None
     except FileNotFoundError:
-        logger.error("[YouTube] yt-dlp not found. Install: pip install yt-dlp")
+        logger.error("[YouTube] 未找到 yt-dlp。请安装：pip install yt-dlp")
         return None
     except subprocess.TimeoutExpired:
-        logger.error("[YouTube] Download timed out (10min limit)")
+        logger.error("[YouTube] 下载超时（10 分钟限制）")
         return None
 
 
@@ -454,11 +454,11 @@ def download_subtitles(
                     logger.info(f"[YouTube] Subtitle saved: {matches[-1]}")
                     return matches[-1]
         except FileNotFoundError:
-            logger.error("[YouTube] yt-dlp not found. Install: pip install yt-dlp")
+            logger.error("[YouTube] 未找到 yt-dlp。请安装：pip install yt-dlp")
             return None
         except subprocess.TimeoutExpired:
-            logger.error("[YouTube] Subtitle download timed out")
+            logger.error("[YouTube] 字幕下载超时")
             return None
 
-    logger.warning("[YouTube] No subtitles found in any language")
+    logger.warning("[YouTube] 未找到任何语言的字幕")
     return None

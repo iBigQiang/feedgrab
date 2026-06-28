@@ -155,6 +155,18 @@ def _is_graphql_enabled() -> bool:
     return os.getenv("X_GRAPHQL_ENABLED", "true").lower() in ("true", "1", "yes")
 
 
+def _is_graphql_auth_error(error: str) -> bool:
+    """Return whether a GraphQL failure means the current cookie should be skipped."""
+    lowered = error.lower()
+    return "401" in error or "403" in error or "unauthorized" in lowered
+
+
+def _is_graphql_rate_limit_error(error: str) -> bool:
+    """Return whether a GraphQL failure means the current cookie is rate limited."""
+    lowered = error.lower()
+    return "429" in error or "rate limit" in lowered or "rate limited" in lowered
+
+
 # ---------------------------------------------------------------------------
 # Tier 0: GraphQL API (new — ported from baoyu)
 # ---------------------------------------------------------------------------
@@ -572,36 +584,67 @@ async def fetch_twitter(url: str) -> Dict[str, Any]:
     # Tier 0: GraphQL (needs cookie auth, most complete)
     if tweet_id and _is_graphql_enabled():
         try:
-            from feedgrab.fetchers.twitter_cookies import load_twitter_cookies, has_required_cookies
-            cookies = load_twitter_cookies()
-            if has_required_cookies(cookies):
-                logger.info(f"[Twitter] Tier 0 — GraphQL: {url}")
+            from feedgrab.fetchers.twitter_cookies import (
+                activate_twitter_cookie,
+                has_required_cookies,
+                is_twitter_cookie_rate_limited,
+                load_all_twitter_cookie_sets,
+            )
+
+            cookie_sets = [
+                (source_label, cookies)
+                for source_label, cookies in load_all_twitter_cookie_sets()
+                if has_required_cookies(cookies)
+                and not is_twitter_cookie_rate_limited(cookies)
+            ]
+            if cookie_sets:
                 import time as _time
-                data = None
-                last_error = None
-                for attempt in range(4):  # 1 initial + 3 retries
-                    try:
-                        data = await _fetch_via_graphql(url, tweet_id, cookies=cookies)
-                        if data and data.get("text"):
-                            break
-                        last_error = "empty response"
-                    except Exception as gql_err:
-                        err_str = str(gql_err)
-                        # Don't retry auth errors — propagate immediately
-                        if "401" in err_str or "403" in err_str or "unauthorized" in err_str.lower():
-                            raise
-                        last_error = err_str
-                        data = None
-                    if attempt < 3:
-                        logger.warning(
-                            f"[Twitter] GraphQL 失败({last_error})，"
-                            f"5秒后第 {attempt + 1}/3 次重试..."
-                        )
-                        _time.sleep(5)
-                if data and data.get("text"):
-                    _try_fetch_article_body(data, url, "[Twitter]")
-                    return data
-                logger.warning("[Twitter] GraphQL 3次重试后仍无有效数据，降级到 oEmbed")
+
+                max_attempts = 1 if len(cookie_sets) > 1 else 4
+                for source_label, cookies in cookie_sets:
+                    activate_twitter_cookie(cookies)
+                    account_key = cookies.get("auth_token", "")[:8]
+                    logger.info(
+                        f"[Twitter] Tier 0 — GraphQL ({source_label}, {account_key}...): {url}"
+                    )
+                    data = None
+                    last_error = None
+                    for attempt in range(max_attempts):
+                        try:
+                            data = await _fetch_via_graphql(url, tweet_id, cookies=cookies)
+                            if data and data.get("text"):
+                                break
+                            last_error = "empty response"
+                        except Exception as gql_err:
+                            last_error = str(gql_err)
+                            data = None
+                            if (
+                                _is_graphql_auth_error(last_error)
+                                or _is_graphql_rate_limit_error(last_error)
+                            ):
+                                logger.warning(
+                                    f"[Twitter] GraphQL Cookie {source_label} "
+                                    f"不可用({last_error})，尝试下一组 Cookie"
+                                )
+                                break
+
+                        if attempt < max_attempts - 1:
+                            logger.warning(
+                                f"[Twitter] GraphQL {source_label} 失败({last_error})，"
+                                f"5秒后第 {attempt + 1}/{max_attempts - 1} 次重试..."
+                            )
+                            _time.sleep(5)
+
+                    if data and data.get("text"):
+                        _try_fetch_article_body(data, url, "[Twitter]")
+                        return data
+
+                    logger.warning(
+                        f"[Twitter] GraphQL {source_label} 未拿到有效数据"
+                        f"({last_error or 'unknown'})，尝试下一组 Cookie"
+                    )
+
+                logger.warning("[Twitter] 所有 GraphQL Cookie 均失败，降级到 FxTwitter")
             else:
                 logger.warning(
                     "\n"
@@ -623,8 +666,8 @@ async def fetch_twitter(url: str) -> Dict[str, Any]:
             err_msg = str(e)
             if "401" in err_msg or "403" in err_msg or "unauthorized" in err_msg.lower():
                 logger.warning(
-                    "[Twitter] Cookie expired! Run: feedgrab login twitter\n"
-                    "  Falling back to limited mode (no metrics)..."
+                    "[Twitter] Cookie 已过期。请运行：feedgrab login twitter\n"
+                    "  正在回退到受限模式（无互动指标）..."
                 )
             else:
                 logger.warning(f"[Twitter] GraphQL failed ({e}), falling back")
@@ -725,10 +768,10 @@ async def fetch_twitter(url: str) -> Dict[str, Any]:
     except RuntimeError:
         raise
     except Exception as e:
-        logger.error(f"[Twitter] All methods failed: {e}")
+        logger.error(f"[Twitter] 所有抓取方式都失败：{e}")
 
     raise RuntimeError(
-        f"❌ All Twitter fetch methods failed for: {url}\n"
-        f"   Try: feedgrab login twitter (to save session for browser fallback)\n"
-        f"   Then retry: feedgrab {url}"
+        f"❌ Twitter/X 抓取所有方式都失败：{url}\n"
+        "   可尝试运行：feedgrab login twitter（保存浏览器兜底登录态）\n"
+        f"   然后重试：feedgrab {url}"
     )

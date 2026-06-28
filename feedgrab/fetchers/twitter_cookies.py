@@ -29,9 +29,6 @@ from loguru import logger
 
 from feedgrab.config import get_cookie_dir, get_session_dir, get_user_agent
 
-COOKIE_DIR = get_cookie_dir()
-SESSION_DIR = get_session_dir()
-
 # Legacy paths (for backward compatibility migration)
 _LEGACY_COOKIE_DIRS = [
     Path.cwd() / ".feedgrab" / "cookies",       # project-local .feedgrab/cookies/
@@ -128,6 +125,26 @@ def load_twitter_cookies() -> dict:
             return cookies
 
     return all_cookie_sets[0][1]
+
+
+def load_all_twitter_cookie_sets() -> list[tuple[str, dict]]:
+    """Load every usable Twitter cookie set in priority order."""
+    return _load_all_cookie_sets()
+
+
+def activate_twitter_cookie(cookies: dict) -> None:
+    """Record the cookie set currently being used for logging/rotation."""
+    global _current_account_key
+    _current_account_key = (cookies or {}).get("auth_token", "")[:8]
+
+
+def is_twitter_cookie_rate_limited(cookies: dict) -> bool:
+    """Return whether a cookie set is still in the local rate-limit cooldown."""
+    account_key = (cookies or {}).get("auth_token", "")[:8]
+    if not account_key:
+        return False
+    expiry = _rate_limited_accounts.get(account_key, 0)
+    return time.time() < expiry
 
 
 def _count_available(total: int) -> int:
@@ -325,8 +342,9 @@ def has_required_cookies(cookies: dict) -> bool:
 
 def save_twitter_cookies(cookies: dict) -> None:
     """Save cookies to cookie directory with restrictive permissions."""
-    COOKIE_DIR.mkdir(parents=True, exist_ok=True)
-    cookie_path = COOKIE_DIR / "x.json"
+    cookie_dir = get_cookie_dir()
+    cookie_dir.mkdir(parents=True, exist_ok=True)
+    cookie_path = cookie_dir / "x.json"
 
     with open(cookie_path, "w", encoding="utf-8") as f:
         json.dump(cookies, f, indent=2)
@@ -386,16 +404,17 @@ def _load_from_cookie_file() -> dict:
 def _load_all_cookie_files() -> list[tuple[str, dict]]:
     """Load cookies from all cookie files: x.json, x_2.json, x_3.json, ..."""
     results = []
+    cookie_dir = get_cookie_dir()
 
     # Primary file
-    cookie_path = COOKIE_DIR / "x.json"
+    cookie_path = cookie_dir / "x.json"
     if not cookie_path.exists():
         # Backward compat: search legacy cookie dirs and migrate
         for legacy_dir in _LEGACY_COOKIE_DIRS:
             for name in ("x.json", "twitter.json"):
                 legacy_path = legacy_dir / name
                 if legacy_path.exists():
-                    COOKIE_DIR.mkdir(parents=True, exist_ok=True)
+                    cookie_dir.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(str(legacy_path), str(cookie_path))
                     logger.info(f"Migrated cookie: {legacy_path} -> {cookie_path}")
                     break
@@ -404,8 +423,8 @@ def _load_all_cookie_files() -> list[tuple[str, dict]]:
             break
 
     # Load x.json and x_{N}.json files
-    if COOKIE_DIR.exists():
-        cookie_files = sorted(COOKIE_DIR.glob("x*.json"))
+    if cookie_dir.exists():
+        cookie_files = sorted(cookie_dir.glob("x*.json"))
         for cf in cookie_files:
             # Match x.json, x_2.json, x_3.json but not xhs.json etc
             name = cf.stem
@@ -442,21 +461,22 @@ def _load_from_playwright_session() -> dict:
 def _load_all_playwright_sessions() -> list[tuple[str, dict]]:
     """Load cookies from all Playwright sessions: twitter.json, twitter_2.json, ..."""
     results = []
+    session_dir = get_session_dir()
 
     # Primary file migration
-    session_path = SESSION_DIR / "twitter.json"
+    session_path = session_dir / "twitter.json"
     if not session_path.exists():
         for legacy_dir in _LEGACY_SESSION_DIRS:
             legacy_path = legacy_dir / "twitter.json"
             if legacy_path.exists():
-                SESSION_DIR.mkdir(parents=True, exist_ok=True)
+                session_dir.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(str(legacy_path), str(session_path))
                 logger.info(f"Migrated session: {legacy_path} -> {session_path}")
                 break
 
     # Load twitter.json and twitter_{N}.json files
-    if SESSION_DIR.exists():
-        session_files = sorted(SESSION_DIR.glob("twitter*.json"))
+    if session_dir.exists():
+        session_files = sorted(session_dir.glob("twitter*.json"))
         for sf in session_files:
             name = sf.stem
             if name == "twitter" or (name.startswith("twitter_") and name[8:].isdigit()):

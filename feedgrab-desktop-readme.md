@@ -155,7 +155,9 @@ npm install
 
 ### 4.1 输出目录
 
-GUI 抓取时必须先在“抓取”或“设置”页点击“选择”，指定一个输出目录。桌面端会把这个路径作为本次抓取的 `OUTPUT_DIR` 传给 worker，不会自动改写 `.env`。
+安装版首次启动时，GUI 默认把“输出目录”指向主程序安装目录下的 `output` 子目录，例如 `D:\feedgrab Desktop\output`。用户也可以在“抓取”或“设置”页点击“选择”，改成 Obsidian 收件箱或其他资料库目录。桌面端会把这个路径作为本次抓取的 `OUTPUT_DIR` 传给 worker，不会自动改写 `.env`。
+
+“Obsidian Vault”安装初始留空；只有用户明确填写后，才会作为高优先级 Markdown 输出根目录。
 
 CLI 路径仍遵循原规则：
 
@@ -166,7 +168,7 @@ CLI 路径仍遵循原规则：
 PowerShell 临时设置示例：
 
 ```powershell
-$env:OUTPUT_DIR = "D:\Notes\Feeds"
+$env:OUTPUT_DIR = "D:\feedgrab-output"
 ```
 
 ### 4.2 session / Cookie 目录
@@ -399,10 +401,10 @@ $env:CHROME_CDP_LOGIN = ""
 https://github.com/iBigQiang/feedgrab
 ```
 
-4. 点击“选择”，指定输出目录，例如：
+4. 确认默认输出目录，或点击“选择”改成自己的输出目录，例如：
 
 ```text
-D:\Notes\Feeds
+D:\feedgrab Desktop\output
 ```
 
 5. 点击“开始抓取”。
@@ -567,14 +569,14 @@ python -m playwright install chromium
 
 ### 10.5 GUI 抓取没有输出文件
 
-先确认你已经在 GUI 中选择了输出目录。CLI 路径则检查：
+先确认 GUI“设置”里的输出目录是否正确；安装版默认是主程序安装目录下的 `output`。CLI 路径则检查：
 
 ```powershell
 $env:OUTPUT_DIR
 $env:OBSIDIAN_VAULT
 ```
 
-如果使用 Obsidian，注意 `OBSIDIAN_VAULT` 优先于 `OUTPUT_DIR`。
+如果明确填写了 Obsidian Vault，注意 `OBSIDIAN_VAULT` 优先于 `OUTPUT_DIR`。
 
 ### 10.6 登录页显示未登录
 
@@ -654,7 +656,7 @@ npm run build
 启动后按这个顺序使用：
 
 1. 进入“抓取”页。
-2. 点击“选择”指定输出目录。
+2. 确认默认输出目录，或点击“选择”指定自己的输出目录。
 3. 粘贴一个 GitHub 或公开网页链接做首次抓取。
 4. 查看“实时日志”和“任务”页状态。
 5. 在“输出”页打开生成的 Markdown。

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 
 import type {
   DoctorCheck,
@@ -84,6 +84,10 @@ const loginPlatforms: SupportedPlatform[] = [
   "bilibili",
   "web"
 ];
+
+const legacyDesktopDefaultPaths = new Set([
+  "e:\\obsidian\\qiang_obsidian\\inbox"
+]);
 
 export function detectPlatformFromUrl(url: string): SupportedPlatform {
   const trimmed = url.trim();
@@ -286,7 +290,9 @@ export function createMockPythonWorkerClient(): PythonWorkerClient {
     },
     settingsSnapshot() {
       return Promise.resolve({
-        outputDirectory: "D:\\Notes\\Feeds",
+        outputDirectory: "",
+        obsidianVault: "",
+        effectiveOutputDirectory: "",
         concurrency: 2,
         downloadImages: true,
         localizeMedia: true,
@@ -300,7 +306,7 @@ export function createMockPythonWorkerClient(): PythonWorkerClient {
             name: "OUTPUT_DIR",
             label: "输出目录",
             type: "path",
-            value: "D:\\Notes\\Feeds",
+            value: "",
             description: "Markdown 和附件的默认输出目录"
           },
           { name: "DOWNLOAD_IMAGES", label: "下载图片", type: "boolean", value: true }
@@ -395,10 +401,10 @@ export function createMockPythonWorkerClient(): PythonWorkerClient {
       return Promise.resolve({
         ok: true,
         sourceDirectory: sourceRoot,
-        targetDirectory: "D:\\Notes\\Feeds\\sessions",
+        targetDirectory: "D:\\feedgrab Desktop\\sessions",
         imported: candidates.map((item) => ({
           source: `${sourceRoot}\\${item}.json`,
-          target: `D:\\Notes\\Feeds\\sessions\\${item}.json`
+          target: `D:\\feedgrab Desktop\\sessions\\${item}.json`
         })),
         skipped: [],
         disabled: [],
@@ -429,6 +435,7 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
   private seq = 1;
   private readonly pending = new Map<string, PendingRequest>();
   private readonly artifacts = new Map<string, string>();
+  private readonly activeFetchJobs = new Map<string, FetchJobSnapshot>();
   private readonly listeners = new Set<(event: FeedgrabWorkerEvent) => void>();
   private readonly command: string;
   private readonly args: string[];
@@ -467,7 +474,7 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
     this.ensureProcess();
     const child = this.child;
     if (!child) {
-      return Promise.reject(new Error("worker process is not available"));
+      return Promise.reject(new Error("Python worker 进程不可用"));
     }
 
     if (urls.length === 0 && targets.length > 0) {
@@ -497,11 +504,13 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
           output_dir: request.outputDirectory
         }
       };
+      this.activeFetchJobs.set(job.id, job);
       return new Promise((resolve, reject) => {
         const accepted = this.waitForJobAccepted(job.id, () => resolve([job]));
         child.stdin.write(`${JSON.stringify(payload)}\n`, (error?: Error | null) => {
           if (error) {
             accepted();
+            this.activeFetchJobs.delete(job.id);
             reject(error);
           }
         });
@@ -517,6 +526,9 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
       attachments: [],
       createdAt: new Date().toISOString()
     }));
+    for (const job of jobs) {
+      this.activeFetchJobs.set(job.id, job);
+    }
 
     return new Promise((resolve, reject) => {
       let remaining = jobs.length;
@@ -533,6 +545,9 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
           }
           if (error) {
             failed = true;
+            for (const pendingJob of jobs) {
+              this.activeFetchJobs.delete(pendingJob.id);
+            }
             reject(error);
             return;
           }
@@ -605,8 +620,13 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
     return this.request("settings_snapshot", {}).then((result) => {
       const payload = asRecord(result);
       const items = Array.isArray(payload.items) ? payload.items.map(asRecord) : [];
+      const env = this.runtimeEnvironment();
+      const outputDirectory = findSettingString(items, "OUTPUT_DIR") ?? env.OUTPUT_DIR ?? "";
+      const obsidianVault = findSettingString(items, "OBSIDIAN_VAULT") ?? env.OBSIDIAN_VAULT ?? "";
       return {
-        outputDirectory: String(findSettingValue(items, "OUTPUT_DIR") || "D:\\Notes\\Feeds"),
+        outputDirectory,
+        obsidianVault,
+        effectiveOutputDirectory: obsidianVault || outputDirectory,
         concurrency: 1,
         downloadImages: true,
         localizeMedia: true,
@@ -616,7 +636,7 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
   }
 
   settingsSchema(): Promise<SettingsSchema> {
-    return this.request("settings_schema", {}).then(normalizeSettingsSchema).catch(() => defaultSettingsSchema());
+    return this.request("settings_schema", {}).then(normalizeSettingsSchema).catch(() => defaultSettingsSchema(this.runtimeEnvironment()));
   }
 
   settingsUpdate(values: Record<string, SettingsFieldValue>): Promise<SettingsUpdateResult> {
@@ -635,7 +655,7 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
     }).catch((error: unknown) => ({
       ok: false,
       updated: [],
-      error: error instanceof Error ? error.message : "settings_update failed"
+      error: error instanceof Error ? `保存设置失败：${error.message}` : "保存设置失败"
     }));
   }
 
@@ -703,7 +723,7 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
       skipped: [],
       disabled: [],
       ignored: [],
-      error: error instanceof Error ? error.message : "import_login_sessions failed"
+      error: error instanceof Error ? `导入登录态失败：${error.message}` : "导入登录态失败"
     }));
   }
 
@@ -712,11 +732,7 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
       const args = this.loginArgs(platform);
       const child = spawn(this.command, args, {
         cwd: this.cwd,
-        env: {
-          ...process.env,
-          ...this.env,
-          PYTHONIOENCODING: "utf-8"
-        },
+        env: this.loginEnvironment(),
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true
       });
@@ -740,7 +756,7 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
           platform,
           status: code === 0 ? "connected" : "expired",
           message: message || (code === 0 ? `${platformLabel(platform)} 登录完成` : `${platformLabel(platform)} 登录失败`),
-          error: code === 0 ? undefined : message || `login process exited with code ${code ?? "unknown"}`
+          error: code === 0 ? undefined : message || `登录进程退出，退出码 ${code ?? "未知"}`
         });
       });
     });
@@ -852,7 +868,7 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
     this.ensureProcess();
     const child = this.child;
     if (!child) {
-      return Promise.reject(new Error("worker process is not available"));
+      return Promise.reject(new Error("Python worker 进程不可用"));
     }
 
     return new Promise((resolve, reject) => {
@@ -894,6 +910,7 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
       }
       this.pending.clear();
       this.child = undefined;
+      this.failActiveFetchJobs(error.message);
       this.emitEvent({
         event: "error",
         error: {
@@ -904,12 +921,13 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
       });
     });
     child.on("exit", (code) => {
-      const error = new Error(`feedgrab worker exited with code ${code ?? "unknown"}`);
+      const error = new Error(`feedgrab worker 已退出，退出码 ${code ?? "未知"}`);
       for (const pending of this.pending.values()) {
         pending.reject(error);
       }
       this.pending.clear();
       this.child = undefined;
+      this.failActiveFetchJobs(error.message);
     });
   }
 
@@ -939,6 +957,9 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
       this.artifacts.set(event.id, event.artifact.path);
       return;
     }
+    if (event.method === "fetch" && event.id && ["error", "done", "cancelled"].includes(event.event)) {
+      this.activeFetchJobs.delete(event.id);
+    }
     if (event.event === "ready" || event.event === "progress" || event.event === "log" || event.event === "diagnostic") {
       return;
     }
@@ -951,12 +972,40 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
 
     if (event.event === "error") {
       this.pending.delete(id);
-      pending.reject(new Error(event.error?.message ?? "worker error"));
+      pending.reject(new Error(event.error?.message ?? "worker 执行失败"));
       return;
     }
     if (event.event === "done" || event.event === "cancelled") {
       this.pending.delete(id);
       pending.resolve(event);
+    }
+  }
+
+  private failActiveFetchJobs(message: string): void {
+    const jobs = [...this.activeFetchJobs.values()];
+    this.activeFetchJobs.clear();
+    for (const job of jobs) {
+      this.emitEvent({
+        id: job.id,
+        event: "error",
+        method: "fetch",
+        url: job.url,
+        error: {
+          code: "worker_exited",
+          message,
+          recoverable: true
+        }
+      });
+      this.emitEvent({
+        id: job.id,
+        event: "done",
+        method: "fetch",
+        result: {
+          fetched: 0,
+          errors: 1,
+          error: message
+        }
+      });
     }
   }
 
@@ -971,6 +1020,22 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
       return ["-m", "feedgrab.cli", "login", platform];
     }
     return ["login", platform];
+  }
+
+  private loginEnvironment(): NodeJS.ProcessEnv {
+    const baseEnv = this.runtimeEnvironment();
+    return {
+      ...baseEnv,
+      ...readSavedSettingsEnvironment(baseEnv.FEEDGRAB_SETTINGS_PATH, baseEnv),
+      PYTHONIOENCODING: "utf-8"
+    };
+  }
+
+  private runtimeEnvironment(): NodeJS.ProcessEnv {
+    return {
+      ...process.env,
+      ...this.env
+    };
   }
 
   private waitForJobAccepted(jobId: string, resolve: () => void): () => void {
@@ -1166,8 +1231,12 @@ function isSupportedPlatform(value: unknown): value is SupportedPlatform {
   );
 }
 
-function findSettingValue(items: Array<Record<string, unknown>>, name: string): unknown {
-  return items.find((item) => item.name === name)?.value;
+function findSettingString(items: Array<Record<string, unknown>>, name: string): string | undefined {
+  const item = items.find((entry) => entry.name === name);
+  if (!item || item.value === undefined || item.value === null) {
+    return undefined;
+  }
+  return String(item.value);
 }
 
 function findDiagnosticMessage(items: unknown[], name: string): string | undefined {
@@ -1304,12 +1373,18 @@ function normalizeSettingValue(value: unknown, type?: SettingsFieldSchema["type"
   return undefined;
 }
 
-function defaultSettingsSchema(): SettingsSchema {
+function defaultSettingsSchema(env: NodeJS.ProcessEnv = process.env): SettingsSchema {
   return {
     basic: [
-      { name: "OUTPUT_DIR", label: "输出目录", type: "path", value: process.env.OUTPUT_DIR || "D:\\Notes\\Feeds" },
-      { name: "FEEDGRAB_DATA_DIR", label: "数据目录", type: "path", value: process.env.FEEDGRAB_DATA_DIR || "" },
-      { name: "BROWSER_USER_AGENT", label: "浏览器 User-Agent", type: "string", value: process.env.BROWSER_USER_AGENT || defaultRuntimeUserAgent() }
+      { name: "OUTPUT_DIR", label: "输出目录", type: "path", value: env.OUTPUT_DIR || "" },
+      { name: "OBSIDIAN_VAULT", label: "Obsidian Vault", type: "path", value: env.OBSIDIAN_VAULT || "", description: "高优先级" },
+      {
+        name: "FEEDGRAB_DATA_DIR",
+        label: "登录态和数据目录",
+        type: "path",
+        value: env.FEEDGRAB_DATA_DIR || env.FEEDGRAB_INSTALL_SESSIONS_DIR || ""
+      },
+      { name: "BROWSER_USER_AGENT", label: "浏览器 User-Agent", type: "string", value: env.BROWSER_USER_AGENT || defaultRuntimeUserAgent() }
     ],
     platforms: [
       {
@@ -1368,6 +1443,79 @@ function normalizeImportRows(value: unknown): LoginSessionImportResult["imported
       reason: typeof payload.reason === "string" ? payload.reason : undefined
     };
   });
+}
+
+function readSavedSettingsEnvironment(
+  settingsPath: string | undefined,
+  baseEnv: NodeJS.ProcessEnv = process.env
+): NodeJS.ProcessEnv {
+  if (!settingsPath) {
+    return {};
+  }
+  try {
+    const payload = JSON.parse(readFileSync(settingsPath, "utf8")) as Record<string, unknown>;
+    const values = payload.values && typeof payload.values === "object" ? payload.values : payload;
+    if (!values || typeof values !== "object" || Array.isArray(values)) {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(values as Record<string, unknown>)
+        .map(([name, value]) => [name, settingsValueToEnvString(name, value, baseEnv)] as const)
+        .filter((entry): entry is readonly [string, string] => typeof entry[1] === "string")
+    ) as NodeJS.ProcessEnv;
+  } catch {
+    return {};
+  }
+}
+
+function settingsValueToEnvString(name: string, value: unknown, baseEnv: NodeJS.ProcessEnv): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : undefined;
+  }
+  if (typeof value === "string") {
+    if (isLegacyDesktopDefaultPath(value)) {
+      if (name === "OUTPUT_DIR") {
+        return baseEnv.OUTPUT_DIR || undefined;
+      }
+      if (name === "OBSIDIAN_VAULT") {
+        return "";
+      }
+    }
+    if (name === "OUTPUT_DIR" && isDesktopDefaultOutputDirValue(value)) {
+      return baseEnv.OUTPUT_DIR || undefined;
+    }
+    return normalizeSavedSettingsPath(name, value, baseEnv);
+  }
+  return undefined;
+}
+
+function isLegacyDesktopDefaultPath(value: string): boolean {
+  return legacyDesktopDefaultPaths.has(normalizePathForMatch(value));
+}
+
+function normalizePathForMatch(value: string): string {
+  return value.trim().replace(/\//g, "\\").replace(/\\+$/g, "").toLowerCase();
+}
+
+function isDesktopDefaultOutputDirValue(value: string): boolean {
+  return ["", "output", ".", ".\\output", "\\output", "./output"].includes(normalizePathForMatch(value));
+}
+
+function normalizeSavedSettingsPath(name: string, value: string, baseEnv: NodeJS.ProcessEnv): string {
+  if (name !== "FEEDGRAB_DATA_DIR") {
+    return value;
+  }
+  const normalized = normalizePathForMatch(value);
+  if (["", "sessions", ".", ".\\sessions", "\\sessions"].includes(normalized)) {
+    return baseEnv.FEEDGRAB_INSTALL_SESSIONS_DIR || baseEnv.FEEDGRAB_DATA_DIR || value;
+  }
+  return value;
 }
 
 function platformLabel(platform: SupportedPlatform): string {

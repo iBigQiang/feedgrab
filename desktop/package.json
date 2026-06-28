@@ -1,6 +1,6 @@
 {
   "name": "feedgrab-desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Commercial desktop GUI client for feedgrab.",
   "author": "iBigQiang",
   "private": true,
@@ -12,18 +12,16 @@
     "runtime:build": "powershell -ExecutionPolicy Bypass -File scripts/build-runtime.ps1",
     "runtime:chromium": "powershell -ExecutionPolicy Bypass -File scripts/prepare-chromium-runtime.ps1",
     "runtime:worker": "powershell -ExecutionPolicy Bypass -File scripts/build-python-worker.ps1",
-    "pack:dev": "npm run build && npm run runtime:build && powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1 -Target portable",
-    "pack:user": "npm run build && npm run runtime:build && powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1 -Target nsis",
-    "pack:all": "npm run build && npm run runtime:build && powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1 -Target all",
+    "pack:dev": "npm run build && npm run runtime:build && powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1 -Target portable -SkipRuntimeBuild",
+    "pack:user": "npm run build && npm run runtime:build && powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1 -Target nsis -SkipRuntimeBuild",
+    "pack:all": "npm run build && npm run runtime:build && powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1 -Target all -SkipRuntimeBuild",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
     "lint": "eslint \"electron/**/*.{ts,cts}\" \"renderer/src/**/*.{ts,tsx}\" \"tests/**/*.{ts,tsx}\" \"vite.config.ts\" --max-warnings=0",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "^5.0.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "vite": "^7.0.0"
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
@@ -32,6 +30,7 @@
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
     "electron": "^39.0.0",
     "electron-builder": "^26.0.0",
     "eslint": "^9.0.0",
@@ -39,6 +38,7 @@
     "jsdom": "^27.0.0",
     "typescript": "^5.8.0",
     "typescript-eslint": "^8.0.0",
+    "vite": "^7.0.0",
     "vitest": "^4.0.0"
   }
 }

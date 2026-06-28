@@ -256,7 +256,7 @@ async def _search_via_browser(
         tier = "Browser"
 
     if not page:
-        logger.warning("[X-SO] All browser fallback tiers failed")
+        logger.warning("[X-SO] 所有浏览器兜底层都失败")
         return []
 
     collector = SearchResponseCollector()
@@ -363,7 +363,7 @@ def _generate_summary_table(
     ]
 
     if not tweets:
-        lines.append("*No results found.*")
+        lines.append("*未找到结果。*")
     else:
         if show_keyword:
             lines.append(

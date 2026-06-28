@@ -922,7 +922,7 @@ def _generate_xhs_summary_table(
     ]
 
     if not valid_notes:
-        lines.append("*No results found.*")
+        lines.append("*未找到结果。*")
     else:
         if show_keyword:
             lines.append(

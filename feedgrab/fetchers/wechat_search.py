@@ -579,16 +579,16 @@ async def search_wechat_articles(
 
         # Extract search results from browser-rendered page (+ pagination)
         results = await _sogou_search_browser(page, keyword, max_results)
-        logger.info(f"[mpweixin-so] Browser search found {len(results)} results")
+        logger.info(f"[mpweixin-so] 浏览器搜索找到 {len(results)} 条结果")
     except ImportError:
-        logger.warning("[mpweixin-so] Playwright not installed, falling back to HTTP search")
+        logger.warning("[mpweixin-so] 未安装 Playwright，改用 HTTP 搜索")
         results = _sogou_search_multi(keyword, max_results=max_results)
     except Exception as e:
-        logger.warning(f"[mpweixin-so] Browser search failed: {e}, falling back to HTTP search")
+        logger.warning(f"[mpweixin-so] 浏览器搜索失败：{e}，改用 HTTP 搜索")
         results = _sogou_search_multi(keyword, max_results=max_results)
 
     if not results:
-        logger.warning("[mpweixin-so] No results found")
+        logger.warning("[mpweixin-so] 未找到结果")
         # Cleanup browser if launched
         if context:
             await context.close()
@@ -627,7 +627,7 @@ async def search_wechat_articles(
 
             item_id = item_id_from_url(wx_url)
             if has_item(item_id, index):
-                logger.info(f"[mpweixin-so] Already fetched, skipping: {title[:40]}")
+                logger.info(f"[mpweixin-so] 已抓取过，跳过：{title[:40]}")
                 skipped += 1
                 continue
 
@@ -639,14 +639,14 @@ async def search_wechat_articles(
                 add_item(item_id, wx_url, index)
                 articles.append(item)
                 fetched += 1
-                logger.info(f"[mpweixin-so] Saved: {title[:50]}")
+                logger.info(f"[mpweixin-so] 已保存：{title[:50]}")
             except Exception as e:
-                logger.warning(f"[mpweixin-so] Fetch failed: {title[:40]} — {e}")
+                logger.warning(f"[mpweixin-so] 抓取失败：{title[:40]} — {e}")
                 _save_search_item(item, keyword)
                 articles.append(item)
                 failed += 1
         else:
-            logger.warning(f"[mpweixin-so] Could not resolve URL for: {title[:40]}")
+            logger.warning(f"[mpweixin-so] 无法解析文章 URL：{title[:40]}")
             _save_search_item(item, keyword)
             articles.append(item)
             failed += 1

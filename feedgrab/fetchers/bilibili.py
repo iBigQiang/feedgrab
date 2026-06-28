@@ -49,12 +49,12 @@ def _bili_headers() -> Dict[str, str]:
 
 def _extract_bvid(url_or_bv: str) -> str:
     if not url_or_bv:
-        raise ValueError("empty Bilibili URL/BV")
+        raise ValueError("Bilibili URL/BV 为空")
     if url_or_bv.startswith("BV"):
         return url_or_bv
     m = re.search(r"BV\w+", url_or_bv)
     if not m:
-        raise ValueError(f"Cannot extract BV ID from: {url_or_bv}")
+        raise ValueError(f"无法从输入中提取 BV ID：{url_or_bv}")
     return m.group()
 
 
@@ -69,7 +69,7 @@ def _fetch_view(bvid: str) -> Dict[str, Any]:
     http_client.raise_for_status(resp)
     data = resp.json()
     if data.get("code") != 0:
-        raise ValueError(f"Bilibili view API error: {data.get('message')} (code={data.get('code')})")
+        raise ValueError(f"Bilibili view API 错误：{data.get('message')}（code={data.get('code')}）")
     return data["data"]
 
 
@@ -80,7 +80,7 @@ def _fetch_player_info(aid: int, cid: int, bvid: str, signed: bool) -> Optional[
             params = sign_wbi_params({"aid": aid, "cid": cid, "bvid": bvid})
             endpoint = _PLAYER_WBI_V2_URL
         except Exception as e:
-            logger.warning(f"[Bilibili] WBI signing failed: {e}")
+            logger.warning(f"[Bilibili] WBI 签名失败：{e}")
             return None
     else:
         params = {"aid": aid, "cid": cid, "bvid": bvid}
@@ -96,7 +96,7 @@ def _fetch_player_info(aid: int, cid: int, bvid: str, signed: bool) -> Optional[
         http_client.raise_for_status(resp)
         data = resp.json()
     except requests.RequestException as e:
-        logger.warning(f"[Bilibili] player API request failed ({'wbi' if signed else 'v2'}): {e}")
+        logger.warning(f"[Bilibili] player API 请求失败（{'wbi' if signed else 'v2'}）：{e}")
         return None
 
     if data.get("code") != 0:
@@ -137,7 +137,7 @@ def _fetch_subtitle_body(subtitle_url: str) -> List[Dict[str, Any]]:
         http_client.raise_for_status(resp)
         data = resp.json()
     except (requests.RequestException, ValueError) as e:
-        logger.warning(f"[Bilibili] subtitle fetch failed: {e}")
+        logger.warning(f"[Bilibili] 字幕抓取失败：{e}")
         return []
     body = data.get("body") or []
     if not isinstance(body, list):
@@ -161,7 +161,7 @@ def _fetch_subtitles_snippets(aid: int, cid: int, bvid: str) -> List[Dict[str, A
         subtitles = ((info or {}).get("subtitle") or {}).get("subtitles") or []
 
     if not subtitles:
-        logger.info("[Bilibili] no subtitles available from either player endpoint")
+        logger.info("[Bilibili] 两个 player 端点都没有可用字幕")
         return []
 
     chosen = _pick_best_subtitle(subtitles, preferred_lang)
@@ -170,11 +170,11 @@ def _fetch_subtitles_snippets(aid: int, cid: int, bvid: str) -> List[Dict[str, A
 
     sub_url = chosen.get("subtitle_url") or ""
     lan = chosen.get("lan") or "?"
-    logger.info(f"[Bilibili] subtitle chosen: lan={lan}, url={sub_url[:80]}")
+    logger.info(f"[Bilibili] 已选择字幕：lan={lan}, url={sub_url[:80]}")
 
     body = _fetch_subtitle_body(sub_url)
     snippets = subtitle_body_to_snippets(body)
-    logger.info(f"[Bilibili] parsed {len(snippets)} subtitle snippets")
+    logger.info(f"[Bilibili] 已解析 {len(snippets)} 条字幕片段")
     return snippets
 
 
@@ -183,7 +183,7 @@ def _whisper_fallback_snippets(video_url: str) -> List[Dict[str, Any]]:
     try:
         from feedgrab.fetchers.youtube import _transcribe_via_whisper
     except ImportError as e:
-        logger.warning(f"[Bilibili] Whisper fallback import failed: {e}")
+        logger.warning(f"[Bilibili] Whisper 兜底导入失败：{e}")
         return []
     logger.info(f"[Bilibili] Tier 3 — Whisper via yt-dlp: {video_url}")
     return _transcribe_via_whisper(video_url)

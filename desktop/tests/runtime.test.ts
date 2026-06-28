@@ -18,7 +18,11 @@ describe("resolveFeedgrabRuntime", () => {
       projectRoot: "D:\\AiCode\\feedgrab",
       resourcesPath,
       userDataPath: "C:\\Users\\Qiang\\AppData\\Roaming\\feedgrab Desktop",
-      env: {},
+      env: {
+        FEEDGRAB_SETTINGS_PATH: "E:\\feedgrab-dev\\settings.json",
+        OBSIDIAN_VAULT: "E:\\Obsidian\\Qiang_Obsidian\\inbox",
+        OUTPUT_DIR: "E:\\Obsidian\\Qiang_Obsidian\\inbox"
+      },
       chromiumVersion: "142.0.7444.265",
       exists: (target) => target === workerExe || target === browsersPath
     });
@@ -30,6 +34,14 @@ describe("resolveFeedgrabRuntime", () => {
     expect(runtime.env.PLAYWRIGHT_SKIP_BROWSER_GC).toBe("1");
     expect(runtime.env.FEEDGRAB_INSTALL_SESSIONS_DIR).toBe(
       path.join("C:\\Program Files\\feedgrab Desktop", "sessions")
+    );
+    expect(runtime.env.FEEDGRAB_DATA_DIR).toBe(
+      path.join("C:\\Program Files\\feedgrab Desktop", "sessions")
+    );
+    expect(runtime.env.OUTPUT_DIR).toBe(path.join("C:\\Program Files\\feedgrab Desktop", "output"));
+    expect(runtime.env.OBSIDIAN_VAULT).toBe("");
+    expect(runtime.env.FEEDGRAB_SETTINGS_PATH).toBe(
+      path.join("C:\\Users\\Qiang\\AppData\\Roaming\\feedgrab Desktop", "settings.json")
     );
     expect(runtime.env.BROWSER_USER_AGENT).toContain("Chrome/142.0.7444.265");
   });
@@ -68,6 +80,47 @@ describe("resolveFeedgrabRuntime", () => {
     });
 
     expect(runtime.env.BROWSER_USER_AGENT).toBe("CustomAgent/1.0");
+  });
+
+  it("ignores inherited data directory for bundled install defaults", () => {
+    const resourcesPath = "D:\\feedgrab Desktop\\resources";
+    const runtimeRoot = path.join(resourcesPath, "feedgrab-runtime");
+    const workerExe = path.join(runtimeRoot, "feedgrab-worker", "feedgrab-worker.exe");
+
+    const runtime = resolveFeedgrabRuntime({
+      platform: "win32",
+      projectRoot: "D:\\AiCode\\feedgrab",
+      resourcesPath,
+      userDataPath: "C:\\Users\\Qiang\\AppData\\Roaming\\feedgrab Desktop",
+      env: {
+        FEEDGRAB_DATA_DIR: "E:\\feedgrab-sessions"
+      },
+      exists: (target) => target === workerExe
+    });
+
+    expect(runtime.source).toBe("bundled");
+    expect(runtime.env.FEEDGRAB_INSTALL_SESSIONS_DIR).toBe(path.join("D:\\feedgrab Desktop", "sessions"));
+    expect(runtime.env.FEEDGRAB_DATA_DIR).toBe(path.join("D:\\feedgrab Desktop", "sessions"));
+  });
+
+  it("ignores inherited output directory for bundled install defaults", () => {
+    const resourcesPath = "D:\\feedgrab Desktop\\resources";
+    const runtimeRoot = path.join(resourcesPath, "feedgrab-runtime");
+    const workerExe = path.join(runtimeRoot, "feedgrab-worker", "feedgrab-worker.exe");
+
+    const runtime = resolveFeedgrabRuntime({
+      platform: "win32",
+      projectRoot: "D:\\AiCode\\feedgrab",
+      resourcesPath,
+      userDataPath: "C:\\Users\\Qiang\\AppData\\Roaming\\feedgrab Desktop",
+      env: {
+        OUTPUT_DIR: "E:\\Obsidian\\Qiang_Obsidian\\inbox"
+      },
+      exists: (target) => target === workerExe
+    });
+
+    expect(runtime.source).toBe("bundled");
+    expect(runtime.env.OUTPUT_DIR).toBe(path.join("D:\\feedgrab Desktop", "output"));
   });
 
   it("projects saved desktop proxy settings into the worker startup environment", () => {

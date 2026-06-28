@@ -139,14 +139,14 @@ def cmd_fetch(urls: list):
                 platform = getattr(result, "platform", "") or "unknown"
                 url = getattr(request, "url", "")
                 message = error.get("message") if isinstance(error, dict) else str(error)
-                print(f"\u274c Failed [{platform}] {url}: {message or 'unknown error'}")
+                print(f"\u274c 失败 [{platform}] {url}: {message or '未知错误'}")
 
-            print(f"\n\U0001f4e6 Fetched {success_count}/{len(urls)} URLs")
+            print(f"\n\U0001f4e6 已抓取 {success_count}/{len(urls)} 个 URL")
 
     try:
         asyncio.run(run())
     except KeyboardInterrupt:
-        print("\n\u23f9 Cancelled")
+        print("\n\u23f9 已取消")
     except Exception as e:
         print(f"\u274c {e}")
         sys.exit(1)
@@ -402,12 +402,12 @@ def cmd_detect_ua():
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        print("\u274c Playwright is not installed. Run:\n"
+        print("\u274c 未安装 Playwright。请运行：\n"
               '   pip install "feedgrab[browser]"\n'
               "   playwright install chromium")
         return
 
-    print("\U0001f50d Detecting real Chrome User-Agent...")
+    print("\U0001f50d 正在检测本机 Chrome User-Agent...")
 
     try:
         with sync_playwright() as p:
@@ -419,8 +419,8 @@ def cmd_detect_ua():
             ua = page.evaluate("navigator.userAgent")
             browser.close()
     except Exception as e:
-        print(f"\u274c Failed to detect UA: {e}")
-        print("   Falling back: trying without channel='chrome'...")
+        print(f"\u274c UA 检测失败：{e}")
+        print("   正在回退到不指定 channel='chrome' 的检测方式...")
         try:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
@@ -428,13 +428,13 @@ def cmd_detect_ua():
                 ua = page.evaluate("navigator.userAgent")
                 browser.close()
         except Exception as e2:
-            print(f"\u274c Detection failed: {e2}")
+            print(f"\u274c 检测失败：{e2}")
             return
 
     # Headless mode reports "HeadlessChrome" — normalize to "Chrome"
     ua = ua.replace("HeadlessChrome", "Chrome")
 
-    print(f"\n   Detected: {ua}")
+    print(f"\n   检测结果：{ua}")
 
     # Write to .env
     env_path = Path.cwd() / ".env"
@@ -452,18 +452,18 @@ def cmd_detect_ua():
                 flags=re.MULTILINE,
             )
             env_path.write_text(content, encoding="utf-8")
-            print(f"\n\u2705 Updated BROWSER_USER_AGENT in {env_path}")
+            print(f"\n\u2705 已更新 {env_path} 中的 BROWSER_USER_AGENT")
         else:
             # Append
             with open(env_path, "a", encoding="utf-8") as f:
                 f.write(f"\n# Auto-detected by: feedgrab detect-ua\n{key_line}\n")
-            print(f"\n\u2705 Appended BROWSER_USER_AGENT to {env_path}")
+            print(f"\n\u2705 已追加 BROWSER_USER_AGENT 到 {env_path}")
     else:
         with open(env_path, "w", encoding="utf-8") as f:
             f.write(f"# Auto-detected by: feedgrab detect-ua\n{key_line}\n")
-        print(f"\n\u2705 Created {env_path} with BROWSER_USER_AGENT")
+        print(f"\n\u2705 已创建 {env_path}，并写入 BROWSER_USER_AGENT")
 
-    print(f"   All browser interactions will now use this UA.")
+    print("   后续浏览器交互将使用这个 UA。")
 
 
 def cmd_doctor(platform: str = "all"):
@@ -529,57 +529,57 @@ def cmd_doctor(platform: str = "all"):
             except ImportError:
                 warn(f"{mod} — {install}")
 
-        section("Twitter cookies")
+        section("Twitter Cookie")
         try:
             from feedgrab.fetchers.twitter_cookies import load_twitter_cookies
             cookies = load_twitter_cookies()
             if cookies and cookies.get("auth_token") and cookies.get("ct0"):
                 tok = cookies["auth_token"]
-                ok(f"auth_token={tok[:8]}...  ct0=present")
+                ok(f"auth_token={tok[:8]}...  ct0=已存在")
             else:
-                fail("No valid cookies — run: feedgrab login twitter")
+                fail("未找到有效 Cookie，请运行：feedgrab login twitter")
         except Exception as e:
-            fail(f"Cookie load error: {e}")
+            fail(f"Cookie 加载错误：{e}")
 
-        section("queryId resolution")
+        section("queryId 解析")
         try:
             from feedgrab.fetchers.twitter_graphql import resolve_query_ids
             t0 = time.time()
             ids = resolve_query_ids()
             elapsed = time.time() - t0
             if ids:
-                ok(f"{len(ids)} queryIds resolved in {elapsed:.1f}s")
+                ok(f"已解析 {len(ids)} 个 queryId，用时 {elapsed:.1f}s")
                 for name in ["TweetDetail", "SearchTimeline", "UserTweets", "Bookmarks"]:
                     qid = ids.get(name, "?")
                     ok(f"  {name}: {qid}")
             else:
-                fail("No queryIds resolved")
+                fail("未解析到 queryId")
         except Exception as e:
-            fail(f"queryId resolution failed: {e}")
+            fail(f"queryId 解析失败：{e}")
 
         section("x-client-transaction-id")
         try:
             from feedgrab.fetchers.twitter_graphql import _get_transaction_id
             tid = _get_transaction_id("GET", "/i/api/graphql/test")
             if tid:
-                ok(f"Generated: {tid[:20]}...")
+                ok(f"已生成：{tid[:20]}...")
             else:
-                warn("Failed — SearchTimeline may return 404")
+                warn("生成失败，SearchTimeline 可能返回 404")
         except Exception as e:
-            warn(f"Error: {e}")
+            warn(f"错误：{e}")
 
-        section("Twitter network")
+        section("Twitter 网络")
         try:
             from feedgrab.utils.http_client import get as http_get
             t0 = time.time()
             resp = http_get("https://x.com", timeout=10)
             elapsed = time.time() - t0
             if resp.status_code == 200:
-                ok(f"x.com reachable ({elapsed:.1f}s)")
+                ok(f"x.com 可访问（{elapsed:.1f}s）")
             else:
                 warn(f"x.com status {resp.status_code} ({elapsed:.1f}s)")
         except Exception as e:
-            fail(f"x.com unreachable: {e}")
+            fail(f"x.com 不可访问：{e}")
 
         try:
             from feedgrab.utils.http_client import get as http_get
@@ -591,28 +591,28 @@ def cmd_doctor(platform: str = "all"):
             )
             elapsed = time.time() - t0
             if resp.status_code == 200:
-                ok(f"Community queryId source ({elapsed:.1f}s)")
+                ok(f"社区 queryId 源可访问（{elapsed:.1f}s）")
             else:
-                warn(f"Community source status {resp.status_code}")
+                warn(f"社区源状态码：{resp.status_code}")
         except Exception as e:
-            warn(f"Community source unreachable: {e}")
+            warn(f"社区源不可访问：{e}")
 
     # ── Xiaohongshu ──────────────────────────────────────────────────
     def check_xhs():
         check_browser()
 
-        section("XHS API (xhshow)")
+        section("小红书 API（xhshow）")
         try:
             from xhshow import CryptoConfig
-            ok("xhshow installed")
+            ok("xhshow 已安装")
         except ImportError:
-            warn("xhshow not installed — API mode disabled (pip install xhshow)")
+            warn("未安装 xhshow，API 模式不可用（pip install xhshow）")
 
-        section("XHS session")
+        section("小红书登录态")
         from feedgrab.fetchers.browser import SESSION_DIR
         session_path = Path(SESSION_DIR) / "xhs"
         if session_path.exists():
-            ok(f"Session found: {session_path}")
+            ok(f"已找到登录态：{session_path}")
             # Check for key cookies
             try:
                 session_json = Path(SESSION_DIR) / "xhs.json"
@@ -622,110 +622,110 @@ def cmd_doctor(platform: str = "all"):
                     cookies = {c["name"]: c["value"] for c in data.get("cookies", [])
                                if "xiaohongshu.com" in c.get("domain", "")}
                     if cookies.get("a1"):
-                        ok(f"Cookie a1 present (key cookies: {len(cookies)})")
+                        ok(f"Cookie a1 已存在（关键 Cookie：{len(cookies)} 个）")
                     else:
-                        warn("Cookie a1 missing — session may be invalid. Run: feedgrab login xhs")
+                        warn("缺少 Cookie a1，登录态可能无效。请运行：feedgrab login xhs")
             except Exception:
                 pass
         else:
-            warn(f"No session — run: feedgrab login xhs")
+            warn("未找到登录态，请运行：feedgrab login xhs")
 
-        section("XHS API connectivity")
+        section("小红书 API 连通性")
         try:
             from feedgrab.utils.http_client import get as http_get
             t0 = time.time()
             resp = http_get("https://edith.xiaohongshu.com", timeout=10)
             elapsed = time.time() - t0
-            ok(f"edith.xiaohongshu.com reachable ({elapsed:.1f}s, status {resp.status_code})")
+            ok(f"edith.xiaohongshu.com 可访问（{elapsed:.1f}s，状态码 {resp.status_code}）")
         except Exception as e:
-            warn(f"edith.xiaohongshu.com unreachable: {e}")
+            warn(f"edith.xiaohongshu.com 不可访问：{e}")
 
-        section("XHS network")
+        section("小红书网络")
         try:
             from feedgrab.utils.http_client import get as http_get
             t0 = time.time()
             resp = http_get("https://www.xiaohongshu.com", timeout=10)
             elapsed = time.time() - t0
             if resp.status_code == 200:
-                ok(f"xiaohongshu.com reachable ({elapsed:.1f}s)")
+                ok(f"xiaohongshu.com 可访问（{elapsed:.1f}s）")
             else:
                 warn(f"xiaohongshu.com status {resp.status_code} ({elapsed:.1f}s)")
         except Exception as e:
-            fail(f"xiaohongshu.com unreachable: {e}")
+            fail(f"xiaohongshu.com 不可访问：{e}")
 
     # ── WeChat MP ────────────────────────────────────────────────────
     def check_mpweixin():
         check_browser()
 
-        section("WeChat MP session")
+        section("微信公众号登录态")
         session_path = get_session_dir() / "wechat.json"
         if session_path.exists():
-            ok(f"Session found: {session_path}")
+            ok(f"已找到登录态：{session_path}")
             # Check age
             age_hours = (time.time() - session_path.stat().st_mtime) / 3600
             if age_hours > 96:
-                warn(f"Session is {age_hours:.0f}h old — likely expired (valid ~4 days). "
-                     "Run: feedgrab login wechat")
+                warn(f"登录态已保存 {age_hours:.0f} 小时，可能已过期（通常约 4 天有效）。"
+                     "请运行：feedgrab login wechat")
             else:
-                ok(f"Session age: {age_hours:.0f}h (valid ~96h)")
+                ok(f"登录态时长：{age_hours:.0f} 小时（通常约 96 小时有效）")
         else:
-            fail("No session — run: feedgrab login wechat")
+            fail("未找到登录态，请运行：feedgrab login wechat")
 
-        section("WeChat network")
+        section("微信公众号网络")
         try:
             from feedgrab.utils.http_client import get as http_get
             t0 = time.time()
             resp = http_get("https://mp.weixin.qq.com", timeout=10)
             elapsed = time.time() - t0
             if resp.status_code == 200:
-                ok(f"mp.weixin.qq.com reachable ({elapsed:.1f}s)")
+                ok(f"mp.weixin.qq.com 可访问（{elapsed:.1f}s）")
             else:
-                ok(f"mp.weixin.qq.com responded ({elapsed:.1f}s, status {resp.status_code})")
+                ok(f"mp.weixin.qq.com 已响应（{elapsed:.1f}s，状态码 {resp.status_code}）")
         except Exception as e:
-            fail(f"mp.weixin.qq.com unreachable: {e}")
+            fail(f"mp.weixin.qq.com 不可访问：{e}")
 
     # ── Feishu / Lark ─────────────────────────────────────────────
     def check_feishu():
         check_browser()
 
-        section("Feishu Open API (lark-oapi)")
+        section("飞书 Open API（lark-oapi）")
         try:
             import lark_oapi  # noqa: F401
-            ok("lark-oapi installed")
+            ok("lark-oapi 已安装")
             from feedgrab.config import feishu_app_id, feishu_app_secret
             if feishu_app_id() and feishu_app_secret():
-                ok(f"FEISHU_APP_ID={feishu_app_id()[:6]}...  FEISHU_APP_SECRET=present")
+                ok(f"FEISHU_APP_ID={feishu_app_id()[:6]}...  FEISHU_APP_SECRET=已配置")
             else:
-                warn("FEISHU_APP_ID / FEISHU_APP_SECRET not set — Tier 0 API disabled")
+                warn("未配置 FEISHU_APP_ID / FEISHU_APP_SECRET，Tier 0 API 不可用")
         except ImportError:
-            warn("lark-oapi not installed — Tier 0 API disabled (pip install lark-oapi)")
+            warn("未安装 lark-oapi，Tier 0 API 不可用（pip install lark-oapi）")
 
-        section("Feishu session")
+        section("飞书登录态")
         session_path = Path(get_session_dir()) / "feishu.json"
         if session_path.exists():
-            ok(f"Session found: {session_path}")
+            ok(f"已找到登录态：{session_path}")
             age_hours = (time.time() - session_path.stat().st_mtime) / 3600
-            ok(f"Session age: {age_hours:.0f}h")
+            ok(f"登录态时长：{age_hours:.0f} 小时")
         else:
-            warn("No session — run: feedgrab login feishu (needed for Tier 1 Playwright)")
+            warn("未找到登录态，请运行：feedgrab login feishu（Tier 1 Playwright 需要）")
 
-        section("Feishu config")
+        section("飞书配置")
         from feedgrab.config import feishu_download_images, feishu_page_load_timeout
         ok(f"FEISHU_DOWNLOAD_IMAGES={feishu_download_images()}")
         ok(f"FEISHU_PAGE_LOAD_TIMEOUT={feishu_page_load_timeout()}ms")
 
-        section("Feishu network")
+        section("飞书网络")
         try:
             from feedgrab.utils.http_client import get as http_get
             t0 = time.time()
             resp = http_get("https://my.feishu.cn", timeout=10)
             elapsed = time.time() - t0
             if resp.status_code < 400:
-                ok(f"my.feishu.cn reachable ({elapsed:.1f}s, status {resp.status_code})")
+                ok(f"my.feishu.cn 可访问（{elapsed:.1f}s，状态码 {resp.status_code}）")
             else:
                 warn(f"my.feishu.cn status {resp.status_code} ({elapsed:.1f}s)")
         except Exception as e:
-            fail(f"my.feishu.cn unreachable: {e}")
+            fail(f"my.feishu.cn 不可访问：{e}")
 
     # ── Dispatch ─────────────────────────────────────────────────────
     platform = platform.lower()
@@ -740,7 +740,7 @@ def cmd_doctor(platform: str = "all"):
     }
 
     if platform == "all":
-        print("feedgrab doctor — full diagnostic\n")
+        print("feedgrab doctor — 全量诊断\n")
         check_browser()
         check_x()
         check_xhs()
@@ -748,22 +748,22 @@ def cmd_doctor(platform: str = "all"):
         check_feishu()
     elif platform in targets:
         label, fn = targets[platform]
-        print(f"feedgrab doctor {platform} — {label} diagnostic\n")
+        print(f"feedgrab doctor {platform} — {label} 诊断\n")
         fn()
     else:
-        print(f"\u274c Unknown platform: {platform}")
-        print("Usage: feedgrab doctor [x | xhs | mpweixin | feishu]")
+        print(f"\u274c 未知平台：{platform}")
+        print("用法：feedgrab doctor [x | xhs | mpweixin | feishu]")
         return
 
     # ── Summary ──────────────────────────────────────────────────────
     print(f"\n{'=' * 50}")
-    print(f"  Result: {ok_count} passed, {warn_count} warnings, {fail_count} errors")
+    print(f"  结果：通过 {ok_count} 项，警告 {warn_count} 项，错误 {fail_count} 项")
     if fail_count == 0 and warn_count == 0:
-        print("  All checks passed!")
+        print("  全部检查通过！")
     elif fail_count == 0:
-        print("  Core functionality OK, some optional features missing.")
+        print("  核心功能正常，部分可选能力缺失。")
     else:
-        print("  Some checks failed — see above for fix instructions.")
+        print("  部分检查失败，请按上方提示处理。")
 
 
 # ---------------------------------------------------------------------------
@@ -1157,7 +1157,7 @@ def cmd_hackernews_list(args: list):
     try:
         asyncio.run(run())
     except KeyboardInterrupt:
-        print("\n⏹ Cancelled")
+        print("\n⏹ 已取消")
     except Exception as e:
         print(f"❌ {e}")
         sys.exit(1)
@@ -1219,7 +1219,7 @@ def cmd_medium_user(args: list):
     try:
         asyncio.run(run())
     except KeyboardInterrupt:
-        print("\n⏹ Cancelled")
+        print("\n⏹ 已取消")
     except Exception as e:
         print(f"❌ {e}")
         sys.exit(1)
@@ -1255,7 +1255,7 @@ def cmd_medium_pub(args: list):
     try:
         asyncio.run(run())
     except KeyboardInterrupt:
-        print("\n⏹ Cancelled")
+        print("\n⏹ 已取消")
     except Exception as e:
         print(f"❌ {e}")
         sys.exit(1)
@@ -1295,7 +1295,7 @@ def cmd_reddit_sub(args: list):
     try:
         asyncio.run(run())
     except KeyboardInterrupt:
-        print("\n⏹ Cancelled")
+        print("\n⏹ 已取消")
     except Exception as e:
         print(f"❌ {e}")
         sys.exit(1)
@@ -1336,7 +1336,7 @@ def cmd_weibo_user(args: list):
     try:
         asyncio.run(run())
     except KeyboardInterrupt:
-        print("\n⏹ Cancelled")
+        print("\n⏹ 已取消")
     except Exception as e:
         print(f"❌ {e}")
         sys.exit(1)
@@ -1349,23 +1349,23 @@ def cmd_feishu_wiki(url: str):
     async def run():
         from feedgrab.fetchers.feishu_wiki import fetch_feishu_wiki
         result = await fetch_feishu_wiki(url)
-        wiki_title = result.get("wiki_title", "unknown")
+        wiki_title = result.get("wiki_title", "未知知识库")
         total = result.get("total", 0)
         fetched = result.get("fetched", 0)
         skipped = result.get("skipped", 0)
         failed = result.get("failed", 0)
         print(f"\n{'=' * 50}")
-        print(f"📂 Wiki: {wiki_title}")
-        print(f"   Total docs: {total}")
-        print(f"   Fetched:    {fetched}")
-        print(f"   Skipped:    {skipped}")
-        print(f"   Failed:     {failed}")
+        print(f"📂 知识库：{wiki_title}")
+        print(f"   文档总数：{total}")
+        print(f"   已抓取：  {fetched}")
+        print(f"   已跳过：  {skipped}")
+        print(f"   失败：    {failed}")
         print(f"{'=' * 50}")
 
     try:
         asyncio.run(run())
     except KeyboardInterrupt:
-        print("\n⏹ Cancelled")
+        print("\n⏹ 已取消")
     except Exception as e:
         print(f"❌ {e}")
         sys.exit(1)
@@ -1387,43 +1387,43 @@ def cmd_youtube_download(url: str, mode: str = "video"):
 
     if mode == "all":
         # Run all 4 tasks: MD + video + audio + subtitle
-        print(f"\n📥 YouTube ALL-IN-ONE: {url}")
-        print(f"   Output: {output_dir}\n")
+        print(f"\n📥 YouTube 一键抓取：{url}")
+        print(f"   输出目录：{output_dir}\n")
 
         # Task 1: MD (feedgrab url)
-        print("── [1/4] Saving Markdown...")
+        print("── [1/4] 正在保存 Markdown...")
         try:
             reader = UniversalReader()
             item = asyncio.run(reader.read(url))
-            print(f"   ✅ MD saved: {item.title[:60]}")
+            print(f"   ✅ Markdown 已保存：{item.title[:60]}")
         except Exception as e:
-            print(f"   ⚠️ MD failed: {e}")
+            print(f"   ⚠️ Markdown 保存失败：{e}")
 
         # Task 2: Video
-        print("── [2/4] Downloading video (MP4)...")
+        print("── [2/4] 正在下载视频（MP4）...")
         vpath = download_video(url, output_dir=output_dir, quality=quality,
                                filename_prefix=filename_prefix)
-        print(f"   {'✅' if vpath else '❌'} Video: {vpath or 'failed'}")
+        print(f"   {'✅' if vpath else '❌'} 视频：{vpath or '失败'}")
 
         # Task 3: Audio
-        print("── [3/4] Downloading audio (MP3)...")
+        print("── [3/4] 正在下载音频（MP3）...")
         apath = download_video(url, output_dir=output_dir, audio_only=True,
                                filename_prefix=filename_prefix)
-        print(f"   {'✅' if apath else '❌'} Audio: {apath or 'failed'}")
+        print(f"   {'✅' if apath else '❌'} 音频：{apath or '失败'}")
 
         # Task 4: Subtitle
-        print("── [4/4] Downloading subtitles (SRT)...")
+        print("── [4/4] 正在下载字幕（SRT）...")
         spath = download_subtitles(url, output_dir=output_dir,
                                    filename_prefix=filename_prefix)
-        print(f"   {'✅' if spath else '⚠️'} Subtitle: {spath or 'not available'}")
+        print(f"   {'✅' if spath else '⚠️'} 字幕：{spath or '不可用'}")
 
-        print(f"\n✅ All tasks completed → {output_dir}")
+        print(f"\n✅ 全部任务完成 → {output_dir}")
         return
 
     # Single mode
     mode_label = {"video": "MP4", "audio": "MP3", "subtitle": "SRT"}.get(mode, mode)
-    print(f"\n📥 YouTube download ({mode_label}): {url}")
-    print(f"   Output: {output_dir}\n")
+    print(f"\n📥 YouTube 下载（{mode_label}）：{url}")
+    print(f"   输出目录：{output_dir}\n")
 
     if mode == "subtitle":
         path = download_subtitles(url, output_dir=output_dir, filename_prefix=filename_prefix)
@@ -1435,9 +1435,9 @@ def cmd_youtube_download(url: str, mode: str = "video"):
                               filename_prefix=filename_prefix)
 
     if path:
-        print(f"\n✅ Downloaded: {path}")
+        print(f"\n✅ 已下载：{path}")
     else:
-        print(f"\n❌ Download failed")
+        print("\n❌ 下载失败")
         sys.exit(1)
 
 
@@ -1483,10 +1483,10 @@ def cmd_youtube_search(args: list):
         sys.exit(1)
 
     if not results:
-        print("\u274c No results found")
+        print("\u274c 未找到结果")
         return
 
-    print(f"\n\U0001f50d YouTube search: \"{keyword}\" — {len(results)} results\n")
+    print(f"\n\U0001f50d YouTube 搜索：\"{keyword}\" — {len(results)} 条结果\n")
 
     saved = 0
     for i, video in enumerate(results, 1):
@@ -1494,7 +1494,7 @@ def cmd_youtube_search(args: list):
         print(
             f"  {i}. [{video['duration']}] {video['title'][:70]}\n"
             f"     {video['channel_title']} · "
-            f"{video['view_count']:,} views · "
+            f"{video['view_count']:,} 次观看 · "
             f"{video['published_at'][:10]}"
         )
 
@@ -1510,7 +1510,7 @@ def cmd_youtube_search(args: list):
         if do_download:
             download_video(video["url"], audio_only=audio_only)
 
-    print(f"\n\u2705 Saved {saved} videos to YouTube/search/{keyword}/")
+    print(f"\n\u2705 已保存 {saved} 个视频到 YouTube/search/{keyword}/")
 
 
 def _sanitize_for_dirname(name: str) -> str:
@@ -1532,11 +1532,11 @@ def cmd_mpweixin_account(account_name: str):
         result = await fetch_account_articles(
             account_name, since=since, delay=delay,
         )
-        print(f"\n\u2705 WeChat account fetch complete: '{account_name}'")
-        print(f"   Total: {result['total']}, Fetched: {result['fetched']}, "
-              f"Skipped: {result['skipped']}, Failed: {result['failed']}")
+        print(f"\n\u2705 微信公众号账号批量抓取完成：'{account_name}'")
+        print(f"   总数：{result['total']}，已抓取：{result['fetched']}，"
+              f"已跳过：{result['skipped']}，失败：{result['failed']}")
         if result['articles']:
-            print("\n   Articles:")
+            print("\n   文章：")
             for art in result['articles']:
                 title = art.get('title', 'untitled')[:50]
                 date = art.get('publish_date', '')
@@ -1545,7 +1545,7 @@ def cmd_mpweixin_account(account_name: str):
     try:
         asyncio.run(run())
     except KeyboardInterrupt:
-        print("\n\u23f9 Cancelled")
+        print("\n\u23f9 已取消")
     except SystemExit:
         raise
     except Exception as e:
@@ -1565,12 +1565,12 @@ def cmd_mpweixin_album(url: str):
         result = await fetch_album_articles(
             url, since=since, delay=delay,
         )
-        album_name = result.get('album_name', '') or 'unknown'
-        print(f"\n\u2705 Album fetch complete: '{album_name}'")
-        print(f"   Total: {result['total']}, Fetched: {result['fetched']}, "
-              f"Skipped: {result['skipped']}, Failed: {result['failed']}")
+        album_name = result.get('album_name', '') or '未知专辑'
+        print(f"\n\u2705 微信公众号专辑抓取完成：'{album_name}'")
+        print(f"   总数：{result['total']}，已抓取：{result['fetched']}，"
+              f"已跳过：{result['skipped']}，失败：{result['failed']}")
         if result['articles']:
-            print("\n   Articles:")
+            print("\n   文章：")
             for art in result['articles']:
                 title = art.get('title', 'untitled')[:50]
                 date = art.get('publish_date', '')
@@ -1579,7 +1579,7 @@ def cmd_mpweixin_album(url: str):
     try:
         asyncio.run(run())
     except KeyboardInterrupt:
-        print("\n\u23f9 Cancelled")
+        print("\n\u23f9 已取消")
     except SystemExit:
         raise
     except Exception as e:
@@ -1609,8 +1609,8 @@ def cmd_twitter_search(args: list):
     )
 
     if not x_search_enabled():
-        print("\u274c X keyword search is disabled.")
-        print("   Set X_SEARCH_ENABLED=true in .env to enable.")
+        print("\u274c X 关键词搜索未启用。")
+        print("   请在 .env 中设置 X_SEARCH_ENABLED=true 后再使用。")
         return
 
     # v0.23.0: --people flag \u2192 SearchTimeline with product=People (returns users)
@@ -1641,8 +1641,8 @@ def cmd_twitter_search(args: list):
     from feedgrab.fetchers.twitter_keyword_search import search_twitter_keyword
 
     if len(keywords) > 1:
-        mode = "merge" if merge else "separate"
-        print(f"\n\U0001f50d X batch search: {len(keywords)} keywords ({mode})")
+        mode = "合并" if merge else "分别输出"
+        print(f"\n\U0001f50d X 批量搜索：{len(keywords)} 个关键词（{mode}）")
 
     all_tweets_merged: list[dict] = []
     successful_keywords = 0
@@ -1669,16 +1669,16 @@ def cmd_twitter_search(args: list):
                 raw=raw,
                 skip_summary=merge,
             ))
-            print(f"\n\u2705 X search complete: '{keyword}'")
-            print(f"   Query: {result['query']}")
-            print(f"   Total tweets: {result['total']}")
+            print(f"\n\u2705 X 搜索完成：'{keyword}'")
+            print(f"   查询语句：{result['query']}")
+            print(f"   推文总数：{result['total']}")
             if not merge:
                 if result.get("output_path"):
-                    print(f"   Summary: {result['output_path']}")
+                    print(f"   汇总：{result['output_path']}")
                 if result.get("csv_path"):
                     print(f"   CSV: {result['csv_path']}")
             if result.get("saved"):
-                print(f"   Individual tweets saved: {result['saved']}")
+                print(f"   已保存单篇推文：{result['saved']}")
 
             successful_keywords += 1
             if merge:
@@ -1686,7 +1686,7 @@ def cmd_twitter_search(args: list):
                     td["_keyword"] = keyword
                 all_tweets_merged.extend(result.get("tweets", []))
         except KeyboardInterrupt:
-            print("\n\u23f9 Cancelled")
+            print("\n\u23f9 已取消")
             return
         except SystemExit:
             raise
@@ -1697,7 +1697,7 @@ def cmd_twitter_search(args: list):
                 sys.exit(1)
 
     if failed_keywords and successful_keywords == 0:
-        print(f"\u274c X search failed for all keywords: {', '.join(failed_keywords)}")
+        print(f"\u274c 所有 X 关键词搜索都失败：{', '.join(failed_keywords)}")
         sys.exit(1)
 
     # Generate merged summary table
@@ -1722,9 +1722,9 @@ def cmd_twitter_search(args: list):
             output_path=merged_path,
             show_keyword=True,
         )
-        print(f"\n\U0001f4ca Merged summary: {merged_path}")
+        print(f"\n\U0001f4ca 合并汇总：{merged_path}")
         print(f"   CSV: {merged_path.with_suffix('.csv')}")
-        print(f"   Total: {len(all_tweets_merged)} tweets from {len(keywords)} keywords")
+        print(f"   总数：{len(all_tweets_merged)} 条推文，来自 {len(keywords)} 个关键词")
 
 
 def cmd_twitter_tweet_user_list(args: list, mode: str):
@@ -1743,19 +1743,19 @@ def cmd_twitter_tweet_user_list(args: list, mode: str):
     )
 
     if not x_tweet_user_list_enabled():
-        print("❌ Tweet user-list fetch is disabled.")
-        print("   Set X_TWEET_USER_LIST_ENABLED=true in .env to enable.")
+        print("❌ X 推文互动用户抓取未启用。")
+        print("   请在 .env 中设置 X_TWEET_USER_LIST_ENABLED=true 后再使用。")
         return
 
     if not args:
-        print(f"❌ Usage: feedgrab x-{mode} <tweet_url_or_id>")
+        print(f"❌ 用法：feedgrab x-{mode} <tweet_url_or_id>")
         return
 
     tweet_id = extract_tweet_id(args[0])
     if not tweet_id:
         print(f"❌ 无法从输入解析推文 ID: {args[0]}")
-        print('   Example: feedgrab x-retweeters https://x.com/<u>/status/123456')
-        print('            feedgrab x-retweeters 1234567890')
+        print('   示例：feedgrab x-retweeters https://x.com/<u>/status/123456')
+        print('         feedgrab x-retweeters 1234567890')
         return
 
     cookies = load_twitter_cookies()
@@ -1773,8 +1773,8 @@ def cmd_twitter_tweet_user_list(args: list, mode: str):
 
     label = "转推者" if mode == "retweeters" else "点赞者"
     print(f"✅ 推文 {tweet_id} 的{label}抓取完成")
-    print(f"   总数: {result['total']}")
-    print(f"   汇总: {result.get('summary_path', '')}")
+    print(f"   总数：{result['total']}")
+    print(f"   汇总：{result.get('summary_path', '')}")
     print(f"   CSV:  {result.get('csv_path', '')}")
 
 
@@ -1783,12 +1783,12 @@ def _run_search_people(args: list):
     import asyncio
 
     if not args:
-        print("❌ Usage: feedgrab x-so <keyword> --people")
+        print("❌ 用法：feedgrab x-so <keyword> --people")
         return
 
     keyword = args[0]
     if keyword == "--people":
-        print("❌ Missing keyword. Usage: feedgrab x-so <keyword> --people")
+        print("❌ 缺少关键词。用法：feedgrab x-so <keyword> --people")
         return
 
     from feedgrab.fetchers.twitter_search_people import search_people
@@ -1807,9 +1807,9 @@ def _run_search_people(args: list):
         print(f"❌ 人物搜索失败: {e}")
         return
 
-    print(f"✅ 人物搜索完成: '{keyword}'")
-    print(f"   总数: {result['total']}")
-    print(f"   汇总: {result.get('summary_path', '')}")
+    print(f"✅ 人物搜索完成：'{keyword}'")
+    print(f"   总数：{result['total']}")
+    print(f"   汇总：{result.get('summary_path', '')}")
     print(f"   CSV:  {result.get('csv_path', '')}")
 
 
@@ -1834,8 +1834,8 @@ def cmd_zhihu_search(args: list):
     from feedgrab.fetchers.zhihu_search import search_zhihu_keyword
 
     if len(keywords) > 1:
-        mode = "merge" if merge else "separate"
-        print(f"\n\U0001f50d Zhihu batch search: {len(keywords)} keywords ({mode})")
+        mode = "合并" if merge else "分别输出"
+        print(f"\n\U0001f50d 知乎批量搜索：{len(keywords)} 个关键词（{mode}）")
 
     all_items_merged: list[dict] = []
 
@@ -1853,22 +1853,22 @@ def cmd_zhihu_search(args: list):
                 save_answers=save_answers,
                 skip_summary=merge,
             ))
-            print(f"\n\u2705 Zhihu search complete: '{keyword}'")
-            print(f"   Total results: {result['total']}")
+            print(f"\n\u2705 知乎搜索完成：'{keyword}'")
+            print(f"   结果总数：{result['total']}")
             if not merge:
                 if result.get("output_path"):
-                    print(f"   Summary: {result['output_path']}")
+                    print(f"   汇总：{result['output_path']}")
                 if result.get("csv_path"):
                     print(f"   CSV: {result['csv_path']}")
             if result.get("saved"):
-                print(f"   Individual answers saved: {result['saved']}")
+                print(f"   已保存单篇回答/文章：{result['saved']}")
 
             if merge:
                 for item in result.get("items", []):
                     item["_keyword"] = keyword
                 all_items_merged.extend(result.get("items", []))
         except KeyboardInterrupt:
-            print("\n\u23f9 Cancelled")
+            print("\n\u23f9 已取消")
             return
         except SystemExit:
             raise
@@ -1897,9 +1897,9 @@ def cmd_zhihu_search(args: list):
             output_path=merged_path,
             show_keyword=True,
         )
-        print(f"\n\U0001f4ca Merged summary: {merged_path}")
+        print(f"\n\U0001f4ca 合并汇总：{merged_path}")
         print(f"   CSV: {merged_path.with_suffix('.csv')}")
-        print(f"   Total: {len(all_items_merged)} results from {len(keywords)} keywords")
+        print(f"   总数：{len(all_items_merged)} 条结果，来自 {len(keywords)} 个关键词")
 
 
 def cmd_xhs_search(args: list):
@@ -1925,8 +1925,8 @@ def cmd_xhs_search(args: list):
     from feedgrab.fetchers.xhs_search_notes import search_xhs_keyword
 
     if len(keywords) > 1:
-        mode = "merge" if merge else "separate"
-        print(f"\n\U0001f50d XHS batch search: {len(keywords)} keywords ({mode})")
+        mode = "合并" if merge else "分别输出"
+        print(f"\n\U0001f50d 小红书批量搜索：{len(keywords)} 个关键词（{mode}）")
 
     all_notes_merged: list[dict] = []
 
@@ -1945,22 +1945,22 @@ def cmd_xhs_search(args: list):
                 save_notes=save_notes,
                 skip_summary=merge,
             )
-            print(f"\n\u2705 XHS search complete: '{keyword}'")
-            print(f"   Total notes: {result['total']}")
+            print(f"\n\u2705 小红书搜索完成：'{keyword}'")
+            print(f"   笔记总数：{result['total']}")
             if not merge:
                 if result.get("output_path"):
-                    print(f"   Summary: {result['output_path']}")
+                    print(f"   汇总：{result['output_path']}")
                 if result.get("csv_path"):
                     print(f"   CSV: {result['csv_path']}")
             if result.get("saved"):
-                print(f"   Individual notes saved: {result['saved']}")
+                print(f"   已保存单篇笔记：{result['saved']}")
 
             if merge:
                 for nd in result.get("notes", []):
                     nd["_keyword"] = keyword
                 all_notes_merged.extend(result.get("notes", []))
         except KeyboardInterrupt:
-            print("\n\u23f9 Cancelled")
+            print("\n\u23f9 已取消")
             return
         except SystemExit:
             raise
@@ -1991,9 +1991,9 @@ def cmd_xhs_search(args: list):
             output_path=merged_path,
             show_keyword=True,
         )
-        print(f"\n\U0001f4ca Merged summary: {merged_path}")
+        print(f"\n\U0001f4ca 合并汇总：{merged_path}")
         print(f"   CSV: {merged_path.with_suffix('.csv')}")
-        print(f"   Total: {len(all_notes_merged)} notes from {len(keywords)} keywords")
+        print(f"   总数：{len(all_notes_merged)} 篇笔记，来自 {len(keywords)} 个关键词")
 
 
 def cmd_wechat_search(keyword: str, max_results: int = 0):
@@ -2001,8 +2001,8 @@ def cmd_wechat_search(keyword: str, max_results: int = 0):
     from feedgrab.config import mpweixin_sogou_enabled, mpweixin_sogou_max_results, mpweixin_sogou_delay
 
     if not mpweixin_sogou_enabled():
-        print("\u274c Sogou WeChat search is disabled.")
-        print("   Set MPWEIXIN_SOGOU_ENABLED=true in .env to enable.")
+        print("\u274c 搜狗微信搜索未启用。")
+        print("   请在 .env 中设置 MPWEIXIN_SOGOU_ENABLED=true 后再使用。")
         return
 
     # Use config default if not specified via --limit
@@ -2016,11 +2016,11 @@ def cmd_wechat_search(keyword: str, max_results: int = 0):
         result = await search_wechat_articles(
             keyword, max_results=max_results, fetch_content=True, delay=delay
         )
-        print(f"\n\u2705 WeChat search complete: '{keyword}'")
-        print(f"   Found: {result['total']}, Fetched: {result['fetched']}, "
-              f"Skipped: {result['skipped']}, Failed: {result['failed']}")
+        print(f"\n\u2705 微信搜索完成：'{keyword}'")
+        print(f"   找到：{result['total']}，已抓取：{result['fetched']}，"
+              f"已跳过：{result['skipped']}，失败：{result['failed']}")
         if result['articles']:
-            print("\n   Articles:")
+            print("\n   文章：")
             for art in result['articles']:
                 title = art.get('title', 'untitled')[:50]
                 author = art.get('author', '')
@@ -2030,7 +2030,7 @@ def cmd_wechat_search(keyword: str, max_results: int = 0):
     try:
         asyncio.run(run())
     except KeyboardInterrupt:
-        print("\n\u23f9 Cancelled")
+        print("\n\u23f9 已取消")
     except SystemExit:
         raise
     except Exception as e:
@@ -2041,37 +2041,37 @@ def cmd_wechat_search(keyword: str, max_results: int = 0):
 def main():
     if len(sys.argv) < 2:
         print("""
-\U0001f4d6 feedgrab \u2014 Universal content grabber
+\U0001f4d6 feedgrab \u2014 通用内容抓取器
 
-Usage:
-    feedgrab setup              First-time deployment guide (recommended for new users)
-    feedgrab <url>              Fetch content from any URL
-    feedgrab clip               Fetch URL from clipboard (solves PowerShell '&' issue)
-    feedgrab <url1> <url2>      Fetch multiple URLs
-    feedgrab x-so <keyword>     Search Twitter by keyword (engagement table)
-    feedgrab xhs-so <keyword>   Search XHS by keyword (engagement table)
-    feedgrab mpweixin-id <name> Fetch all articles from a WeChat public account
-    feedgrab mpweixin-so <keyword>  Search WeChat articles by keyword
-    feedgrab ytb-so <keyword>   Search YouTube videos by keyword
-    feedgrab ytb-dlv <url>      Download YouTube video (MP4)
-    feedgrab ytb-dla <url>      Download YouTube audio (MP3)
-    feedgrab ytb-dlz <url>      Download YouTube subtitles (SRT)
-    feedgrab ytb-all <url>      Download ALL: MD + video + audio + subtitles
-    feedgrab login <platform>   Login to a platform (saves session for browser fallback)
-    feedgrab detect-ua          Detect real Chrome UA and save to .env
-    feedgrab doctor             Run all diagnostic checks
-    feedgrab doctor x           Twitter/X diagnostics (cookies, queryId, network)
-    feedgrab doctor xhs         Xiaohongshu diagnostics (session, network)
-    feedgrab doctor mpweixin    WeChat MP diagnostics (session, network)
-    feedgrab list               Show content statistics
-    feedgrab reset <folder>     Reset a subfolder (delete files + clear dedup index)
-    feedgrab clean-index        Clean up batch records and cache files from index
+用法：
+    feedgrab setup              首次部署向导（新用户推荐）
+    feedgrab <url>              抓取任意 URL 内容
+    feedgrab clip               从剪贴板抓取 URL（避开 PowerShell 的 & 解析问题）
+    feedgrab <url1> <url2>      批量抓取多个 URL
+    feedgrab x-so <keyword>     按关键词搜索 X/Twitter（互动数据表）
+    feedgrab xhs-so <keyword>   按关键词搜索小红书（互动数据表）
+    feedgrab mpweixin-id <name> 抓取公众号账号历史文章
+    feedgrab mpweixin-so <keyword>  按关键词搜索微信公众号文章
+    feedgrab ytb-so <keyword>   按关键词搜索 YouTube 视频
+    feedgrab ytb-dlv <url>      下载 YouTube 视频（MP4）
+    feedgrab ytb-dla <url>      下载 YouTube 音频（MP3）
+    feedgrab ytb-dlz <url>      下载 YouTube 字幕（SRT）
+    feedgrab ytb-all <url>      一键处理：Markdown + 视频 + 音频 + 字幕
+    feedgrab login <platform>   登录平台并保存登录态，供浏览器兜底使用
+    feedgrab detect-ua          检测真实 Chrome UA 并写入 .env
+    feedgrab doctor             运行全量诊断
+    feedgrab doctor x           Twitter/X 诊断（Cookie、queryId、网络）
+    feedgrab doctor xhs         小红书诊断（登录态、网络）
+    feedgrab doctor mpweixin    微信公众号诊断（登录态、网络）
+    feedgrab list               查看内容统计
+    feedgrab reset <folder>     重置子目录（删除文件并清理去重索引）
+    feedgrab clean-index        清理索引中的批量记录和缓存文件
 
-Supported platforms:
-    WeChat, Telegram, X/Twitter, YouTube,
-    Bilibili, Xiaohongshu, Zhihu, RSS, and any web page
+支持平台：
+    微信公众号、Telegram、X/Twitter、YouTube、
+    Bilibili、小红书、知乎、RSS，以及任意网页
 
-Examples:
+示例：
     feedgrab https://mp.weixin.qq.com/s/abc123
     feedgrab https://x.com/elonmusk/status/123456
     feedgrab https://x.com/i/bookmarks
@@ -2088,12 +2088,12 @@ Examples:
     feedgrab mpweixin-so "AI Agent"
     feedgrab ytb-so "AI Agent"
     feedgrab ytb-so "教程" --channel @AndrewNg --order viewCount
-    feedgrab ytb-dlv https://www.youtube.com/watch?v=xxx   # Download video
-    feedgrab ytb-dla https://www.youtube.com/watch?v=xxx   # Download audio
-    feedgrab ytb-dlz https://www.youtube.com/watch?v=xxx   # Download subtitles
-    feedgrab ytb-all https://www.youtube.com/watch?v=xxx   # All: MD+video+audio+srt
+    feedgrab ytb-dlv https://www.youtube.com/watch?v=xxx   # 下载视频
+    feedgrab ytb-dla https://www.youtube.com/watch?v=xxx   # 下载音频
+    feedgrab ytb-dlz https://www.youtube.com/watch?v=xxx   # 下载字幕
+    feedgrab ytb-all https://www.youtube.com/watch?v=xxx   # Markdown+视频+音频+字幕
     feedgrab login xhs
-    feedgrab setup              # First-time setup wizard
+    feedgrab setup              # 首次设置向导
 """)
         return
 
@@ -2105,8 +2105,8 @@ Examples:
         cmd_clip()
     elif cmd == "login":
         if len(sys.argv) < 3:
-            print("\u274c Usage: feedgrab login <platform> [--headless]")
-            print("   Supported: xhs, wechat, twitter")
+            print("\u274c 用法：feedgrab login <platform> [--headless]")
+            print("   支持平台：xhs、wechat、twitter")
             sys.exit(1)
         headless = "--headless" in sys.argv
         cmd_login(sys.argv[2], headless=headless)
@@ -2119,9 +2119,9 @@ Examples:
         cmd_list()
     elif cmd == "reset":
         if len(sys.argv) < 3:
-            print("\u274c Usage: feedgrab reset <folder>")
-            print("   Example: feedgrab reset bookmarks/OpenClaw")
-            print("   Example: feedgrab reset status_author/强子手记")
+            print("\u274c 用法：feedgrab reset <folder>")
+            print("   示例：feedgrab reset bookmarks/OpenClaw")
+            print("   示例：feedgrab reset status_author/强子手记")
             sys.exit(1)
         cmd_reset(sys.argv[2])
     elif cmd == "clean-index":
@@ -2129,23 +2129,23 @@ Examples:
         cmd_clean_index(skip_confirm=skip)
     elif cmd == "mpweixin-id":
         if len(sys.argv) < 3:
-            print("\u274c Usage: feedgrab mpweixin-id <account_name>")
-            print('   Example: feedgrab mpweixin-id "饼干哥哥AGI"')
-            print("   Requires: feedgrab login wechat (MP backend session)")
+            print("\u274c 用法：feedgrab mpweixin-id <公众号名称>")
+            print('   示例：feedgrab mpweixin-id "饼干哥哥AGI"')
+            print("   需要先登录微信公众号后台：feedgrab login wechat")
             sys.exit(1)
         cmd_mpweixin_account(sys.argv[2])
     elif cmd == "mpweixin-zhuanji":
         if len(sys.argv) < 3:
-            print("\u274c Usage: feedgrab mpweixin-zhuanji <album_url>")
-            print('   Example: feedgrab mpweixin-zhuanji "https://mp.weixin.qq.com/mp/appmsgalbum?__biz=xxx&album_id=xxx"')
-            print("   Config:  MPWEIXIN_ZHUANJI_SINCE=2026-01-01  (date filter)")
-            print("            MPWEIXIN_ZHUANJI_DELAY=3            (request interval)")
+            print("\u274c 用法：feedgrab mpweixin-zhuanji <album_url>")
+            print('   示例：feedgrab mpweixin-zhuanji "https://mp.weixin.qq.com/mp/appmsgalbum?__biz=xxx&album_id=xxx"')
+            print("   配置：MPWEIXIN_ZHUANJI_SINCE=2026-01-01  （日期过滤）")
+            print("         MPWEIXIN_ZHUANJI_DELAY=3            （请求间隔）")
             sys.exit(1)
         cmd_mpweixin_album(sys.argv[2])
     elif cmd == "mpweixin-so":
         if len(sys.argv) < 3:
-            print("\u274c Usage: feedgrab mpweixin-so <keyword> [--limit N]")
-            print('   Example: feedgrab mpweixin-so "AI Agent"')
+            print("\u274c 用法：feedgrab mpweixin-so <keyword> [--limit N]")
+            print('   示例：feedgrab mpweixin-so "AI Agent"')
             sys.exit(1)
         keyword = sys.argv[2]
         limit = 0  # 0 means use config default
@@ -2159,86 +2159,86 @@ Examples:
         cmd_wechat_search(keyword, max_results=limit)
     elif cmd == "x-so":
         if len(sys.argv) < 3:
-            print("\u274c Usage: feedgrab x-so <keyword> [options]")
-            print('   Example: feedgrab x-so openclaw')
+            print("\u274c 用法：feedgrab x-so <keyword> [options]")
+            print('   示例：feedgrab x-so openclaw')
             print('            feedgrab x-so openclaw --days 3 --lang en')
             print('            feedgrab x-so "AI Agent" --min-faves 100 --sort top')
             print("            feedgrab x-so 'openclaw lang:zh since:2026-03-06' --raw")
             print('            feedgrab x-so "openclaw,ChatGPT,DeepSeek"  # multi-keyword')
-            print("   Options:")
-            print("     --days N           Time range in days (default: 1)")
-            print("     --lang LANG        Language filter (default: zh)")
-            print("     --min-faves N      Minimum likes (default: 0)")
-            print("     --min-retweets N   Minimum retweets (default: 0)")
-            print("     --sort MODE        live=Latest, top=Top (default: live)")
-            print("     --limit N          Max results (default: 100)")
-            print("     --raw              Use keyword as raw query (skip defaults)")
-            print("     --save             Save individual tweet .md files")
-            print("     --merge            Merge multi-keyword results into one table")
+            print("   选项：")
+            print("     --days N           时间范围，单位天（默认：1）")
+            print("     --lang LANG        语言过滤（默认：zh）")
+            print("     --min-faves N      最低点赞数（默认：0）")
+            print("     --min-retweets N   最低转推数（默认：0）")
+            print("     --sort MODE        live=最新，top=热门（默认：live）")
+            print("     --limit N          最大结果数（默认：100）")
+            print("     --raw              将关键词作为原始查询语句使用")
+            print("     --save             保存单篇推文 .md 文件")
+            print("     --merge            将多关键词结果合并到一个表格")
             sys.exit(1)
         cmd_twitter_search(sys.argv[2:])
     elif cmd == "xhs-so":
         if len(sys.argv) < 3:
-            print("\u274c Usage: feedgrab xhs-so <keyword> [options]")
-            print('   Example: feedgrab xhs-so "AI Agent"')
+            print("\u274c 用法：feedgrab xhs-so <keyword> [options]")
+            print('   示例：feedgrab xhs-so "AI Agent"')
             print('            feedgrab xhs-so "AI Agent" --sort popular')
             print('            feedgrab xhs-so "AI Agent" --type video')
             print('            feedgrab xhs-so "AI Agent" --sort latest --limit 50')
-            print('            feedgrab xhs-so "claude code,openclaw,养龙虾"  # multi-keyword')
-            print("   Options:")
-            print("     --sort MODE        general=综合, popular=热门, latest=最新 (default: general)")
-            print("     --type TYPE        all=全部, video=视频, image=图片 (default: all)")
-            print("     --limit N          Max results (default: 200)")
-            print("     --save             Save individual note .md files")
-            print("     --merge            Merge multi-keyword results into one table")
+            print('            feedgrab xhs-so "claude code,openclaw,养龙虾"  # 多关键词')
+            print("   选项：")
+            print("     --sort MODE        general=综合，popular=热门，latest=最新（默认：general）")
+            print("     --type TYPE        all=全部，video=视频，image=图片（默认：all）")
+            print("     --limit N          最大结果数（默认：200）")
+            print("     --save             保存单篇笔记 .md 文件")
+            print("     --merge            将多关键词结果合并到一个表格")
             sys.exit(1)
         cmd_xhs_search(sys.argv[2:])
     elif cmd == "zhihu-so":
         if len(sys.argv) < 3:
-            print("\u274c Usage: feedgrab zhihu-so <keyword> [options]")
-            print('   Example: feedgrab zhihu-so "openclaw"')
+            print("\u274c 用法：feedgrab zhihu-so <keyword> [options]")
+            print('   示例：feedgrab zhihu-so "openclaw"')
             print('            feedgrab zhihu-so "AI Agent" --sort hot --limit 20')
             print('            feedgrab zhihu-so "openclaw,ChatGPT" --merge')
-            print("   Options:")
-            print("     --sort MODE        hot=热门, new=最新 (default: hot)")
-            print("     --limit N          Max results (default: 50)")
-            print("     --save             Save individual answer .md files")
-            print("     --merge            Merge multi-keyword results into one table")
+            print("   选项：")
+            print("     --sort MODE        hot=热门，new=最新（默认：hot）")
+            print("     --limit N          最大结果数（默认：50）")
+            print("     --save             保存单篇回答/文章 .md 文件")
+            print("     --merge            将多关键词结果合并到一个表格")
             sys.exit(1)
         cmd_zhihu_search(sys.argv[2:])
     elif cmd == "ytb-so":
         if len(sys.argv) < 3:
-            print("\u274c Usage: feedgrab ytb-so <keyword> [options]")
-            print('   Example: feedgrab ytb-so "AI Agent"')
+            print("\u274c 用法：feedgrab ytb-so <keyword> [options]")
+            print('   示例：feedgrab ytb-so "AI Agent"')
             print('            feedgrab ytb-so "教程" --channel @AndrewNg')
             print('            feedgrab ytb-so "ML" --order viewCount --after 2025-01-01')
             print('            feedgrab ytb-so "AI" --download --limit 5')
-            print("   Options:")
-            print("     --channel <handle>   Restrict to a YouTube channel")
-            print("     --order <order>      relevance/date/viewCount/rating (default: relevance)")
-            print("     --after YYYY-MM-DD   Only videos after this date")
-            print("     --before YYYY-MM-DD  Only videos before this date")
-            print("     --min-duration <dur> Minimum duration (e.g. 10m, 1h)")
-            print("     --max-duration <dur> Maximum duration (e.g. 30m, 2h)")
-            print("     --limit N            Max results (default: 10, max: 50)")
-            print("     --download           Download videos after search")
-            print("     --audio-only         Download audio only (MP3)")
+            print("   选项：")
+            print("     --channel <handle>   限定 YouTube 频道")
+            print("     --order <order>      relevance/date/viewCount/rating（默认：relevance）")
+            print("     --after YYYY-MM-DD   只保留此日期之后的视频")
+            print("     --before YYYY-MM-DD  只保留此日期之前的视频")
+            print("     --min-duration <dur> 最短时长，例如 10m、1h")
+            print("     --max-duration <dur> 最长时长，例如 30m、2h")
+            print("     --limit N            最大结果数（默认：10，最大：50）")
+            print("     --download           搜索后下载视频")
+            print("     --audio-only         只下载音频（MP3）")
             sys.exit(1)
         cmd_youtube_search(sys.argv[2:])
     elif cmd in ("ytb-dlv", "ytb-dla", "ytb-dlz", "ytb-all"):
         if len(sys.argv) < 3:
-            print(f"❌ Usage: feedgrab {cmd} <youtube_url>")
-            print(f"   Example: feedgrab {cmd} https://www.youtube.com/watch?v=xxx")
+            print(f"❌ 用法：feedgrab {cmd} <youtube_url>")
+            print(f"   示例：feedgrab {cmd} https://www.youtube.com/watch?v=xxx")
             sys.exit(1)
         mode_map = {"ytb-dlv": "video", "ytb-dla": "audio", "ytb-dlz": "subtitle", "ytb-all": "all"}
         cmd_youtube_download(sys.argv[2], mode=mode_map[cmd])
     elif cmd == "feishu-wiki":
         if len(sys.argv) < 3:
-            print("❌ Usage: feedgrab feishu-wiki <wiki_url>")
-            print("   Example: feedgrab feishu-wiki https://xxx.feishu.cn/wiki/ABC123")
-            print("   Config:   FEISHU_WIKI_BATCH_ENABLED=true (required)")
-            print("             FEISHU_APP_ID + FEISHU_APP_SECRET (Tier 0: Open API)")
-            print("             feedgrab login feishu (Tier 1: browser)")
+            print("❌ 用法：feedgrab feishu-wiki <wiki_url>")
+            print("   示例：feedgrab feishu-wiki https://xxx.feishu.cn/wiki/ABC123")
+            print("   配置：FEISHU_WIKI_BATCH_ENABLED=true（必填）")
+            print("         FEISHU_APP_ID + FEISHU_APP_SECRET（Tier 0：Open API）")
+            print("         feedgrab login feishu（Tier 1：浏览器）")
             sys.exit(1)
         # Force-enable batch for this command
         import os
@@ -2246,47 +2246,47 @@ Examples:
         cmd_feishu_wiki(sys.argv[2])
     elif cmd == "hn":
         if len(sys.argv) < 3:
-            print("❌ Usage: feedgrab hn <category> [--limit N]")
-            print("   Categories: top | new | best | ask | show | jobs")
-            print("   Example: feedgrab hn top --limit 30")
+            print("❌ 用法：feedgrab hn <category> [--limit N]")
+            print("   分类：top | new | best | ask | show | jobs")
+            print("   示例：feedgrab hn top --limit 30")
             print("            feedgrab hn ask")
             sys.exit(1)
         cmd_hackernews_list(sys.argv[2:])
     elif cmd == "medium-user":
         if len(sys.argv) < 3:
-            print("❌ Usage: feedgrab medium-user <@username> [--limit N]")
-            print("   Example: feedgrab medium-user @dotey --limit 20")
+            print("❌ 用法：feedgrab medium-user <@username> [--limit N]")
+            print("   示例：feedgrab medium-user @dotey --limit 20")
             sys.exit(1)
         cmd_medium_user(sys.argv[2:])
     elif cmd == "medium-pub":
         if len(sys.argv) < 3:
-            print("❌ Usage: feedgrab medium-pub <publication-slug> [--limit N]")
-            print("   Example: feedgrab medium-pub better-programming --limit 20")
+            print("❌ 用法：feedgrab medium-pub <publication-slug> [--limit N]")
+            print("   示例：feedgrab medium-pub better-programming --limit 20")
             sys.exit(1)
         cmd_medium_pub(sys.argv[2:])
     elif cmd == "reddit-sub":
         if len(sys.argv) < 3:
-            print("❌ Usage: feedgrab reddit-sub <subreddit> [--sort hot|new|top|best] [--limit N]")
-            print("   Example: feedgrab reddit-sub MachineLearning --sort hot --limit 25")
+            print("❌ 用法：feedgrab reddit-sub <subreddit> [--sort hot|new|top|best] [--limit N]")
+            print("   示例：feedgrab reddit-sub MachineLearning --sort hot --limit 25")
             sys.exit(1)
         cmd_reddit_sub(sys.argv[2:])
     elif cmd == "weibo-user":
         if len(sys.argv) < 3:
-            print("❌ Usage: feedgrab weibo-user <uid> [--limit N]")
-            print("   Example: feedgrab weibo-user 1234567890 --limit 20")
+            print("❌ 用法：feedgrab weibo-user <uid> [--limit N]")
+            print("   示例：feedgrab weibo-user 1234567890 --limit 20")
             sys.exit(1)
         cmd_weibo_user(sys.argv[2:])
     elif cmd == "x-retweeters":
         if len(sys.argv) < 3:
-            print("❌ Usage: feedgrab x-retweeters <tweet_url_or_id>")
-            print("   Example: feedgrab x-retweeters https://x.com/<u>/status/1234567890")
+            print("❌ 用法：feedgrab x-retweeters <tweet_url_or_id>")
+            print("   示例：feedgrab x-retweeters https://x.com/<u>/status/1234567890")
             print("            feedgrab x-retweeters 1234567890")
             sys.exit(1)
         cmd_twitter_tweet_user_list(sys.argv[2:], mode="retweeters")
     elif cmd == "x-favoriters":
         if len(sys.argv) < 3:
-            print("❌ Usage: feedgrab x-favoriters <tweet_url_or_id>")
-            print("   Example: feedgrab x-favoriters https://x.com/<u>/status/1234567890")
+            print("❌ 用法：feedgrab x-favoriters <tweet_url_or_id>")
+            print("   示例：feedgrab x-favoriters https://x.com/<u>/status/1234567890")
             print("            feedgrab x-favoriters 1234567890")
             sys.exit(1)
         cmd_twitter_tweet_user_list(sys.argv[2:], mode="favoriters")
@@ -2294,8 +2294,8 @@ Examples:
         urls = [arg for arg in sys.argv[1:] if arg.startswith(("http", "www.")) or "." in arg]
         cmd_fetch(urls)
     else:
-        print(f"\u274c Unknown command: {cmd}")
-        print("   Run 'feedgrab' with no args for help")
+        print(f"\u274c 未知命令：{cmd}")
+        print("   不带参数运行 'feedgrab' 可查看帮助")
 
 
 if __name__ == "__main__":

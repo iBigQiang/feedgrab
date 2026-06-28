@@ -154,8 +154,8 @@ def test_cli_fetch_reports_batch_failures_without_crashing(monkeypatch, capsys):
 
     out = capsys.readouterr().out
     assert "[github] Sample repo" in out
-    assert "Failed [web] https://example.com/fail: network down" in out
-    assert "Fetched 1/2 URLs" in out
+    assert "失败 [web] https://example.com/fail: network down" in out
+    assert "已抓取 1/2 个 URL" in out
 
 
 def test_cli_twitter_search_exits_when_all_batch_keywords_fail(monkeypatch, capsys):
@@ -187,7 +187,7 @@ def test_cli_twitter_search_exits_when_all_batch_keywords_fail(monkeypatch, caps
     out = capsys.readouterr().out
     assert "❌ [alpha] missing Twitter login" in out
     assert "❌ [beta] missing Twitter login" in out
-    assert "❌ X search failed for all keywords: alpha, beta" in out
+    assert "❌ 所有 X 关键词搜索都失败：alpha, beta" in out
 
 
 def test_cli_twitter_search_merge_writes_empty_summary(monkeypatch, tmp_path, capsys):
@@ -224,10 +224,10 @@ def test_cli_twitter_search_merge_writes_empty_summary(monkeypatch, tmp_path, ca
     cli.cmd_twitter_search(["alpha,beta"])
 
     out = capsys.readouterr().out
-    assert "Merged summary:" in out
+    assert "合并汇总：" in out
     merged_files = list(tmp_path.glob("X/search/1day_new/alpha+beta_*.md"))
     assert len(merged_files) == 1
-    assert "*No results found.*" in merged_files[0].read_text(encoding="utf-8")
+    assert "*未找到结果。*" in merged_files[0].read_text(encoding="utf-8")
 
 
 def test_mcp_read_url_uses_fetch_service(monkeypatch):

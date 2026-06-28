@@ -520,5 +520,5 @@ def try_paywall_bypass(url: str) -> Optional[dict]:
             logger.info(f"[Paywall] Success via {got['strategy']}: {got['title'][:60]}")
             return got
 
-    logger.warning(f"[Paywall] All tiers failed, falling back to Jina: {url}")
+    logger.warning(f"[Paywall] 所有付费墙绕过层都失败，改用 Jina 兜底：{url}")
     return None

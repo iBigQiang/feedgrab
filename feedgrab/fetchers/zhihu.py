@@ -114,11 +114,11 @@ def _load_zhihu_cookies() -> Optional[Dict[str, str]]:
         for c in data.get("cookies", []):
             cookies[c["name"]] = c["value"]
         if "z_c0" not in cookies:
-            logger.warning("[zhihu] Session file missing z_c0 cookie")
+            logger.warning("[zhihu] 登录态文件缺少 z_c0 Cookie")
             return None
         return cookies
     except Exception as e:
-        logger.warning(f"[zhihu] Failed to load session: {e}")
+        logger.warning(f"[zhihu] 登录态加载失败：{e}")
         return None
 
 
@@ -1034,7 +1034,7 @@ async def fetch_zhihu(url: str) -> Dict[str, Any]:
 
     # Detect login page
     if any(kw in jina_content for kw in _ZHIHU_LOGIN_KEYWORDS):
-        logger.warning("[zhihu] Jina returned login page. Run: feedgrab login zhihu")
+        logger.warning("[zhihu] Jina 返回的是登录页。请运行：feedgrab login zhihu")
         jina_content = ""
 
     if jina_content:
@@ -1045,6 +1045,6 @@ async def fetch_zhihu(url: str) -> Dict[str, Any]:
         }
 
     # All tiers failed
-    logger.error(f"[zhihu] All tiers failed for {url}")
-    logger.error("   Tip: Run 'feedgrab login zhihu' to save session, then retry.")
+    logger.error(f"[zhihu] 所有抓取层都失败：{url}")
+    logger.error("   提示：请运行 'feedgrab login zhihu' 保存登录态后重试。")
     return empty_result

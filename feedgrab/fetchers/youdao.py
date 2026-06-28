@@ -293,7 +293,7 @@ def _fetch_via_api(share_key: str) -> Optional[dict]:
             "content": content_obj,
         }
     except Exception as e:
-        logger.warning(f"[youdao] API request failed: {e}")
+        logger.warning(f"[youdao] API 请求失败：{e}")
         return None
 
 
@@ -306,7 +306,7 @@ async def _extract_via_playwright(url: str) -> Optional[dict]:
     try:
         from playwright.async_api import async_playwright
     except ImportError:
-        logger.warning("[youdao] playwright not installed, skipping Tier 1")
+        logger.warning("[youdao] 未安装 Playwright，跳过 Tier 1")
         return None
 
     pw = await async_playwright().start()
@@ -353,7 +353,7 @@ async def _extract_via_playwright(url: str) -> Optional[dict]:
 
         return {"title": title, "content": content} if content else None
     except Exception as e:
-        logger.warning(f"[youdao] Playwright extraction failed: {e}")
+        logger.warning(f"[youdao] Playwright 提取失败：{e}")
         return None
     finally:
         await browser.close()
@@ -453,8 +453,8 @@ def download_youdao_images(
             resp = http_get(url, timeout=30)
             if resp.status_code == 200:
                 fpath.write_bytes(resp.content)
-                logger.info(f"[youdao] Downloaded: {fname} ({len(resp.content)} bytes)")
+                logger.info(f"[youdao] 已下载：{fname}（{len(resp.content)} bytes）")
             else:
-                logger.warning(f"[youdao] Image {resp.status_code}: {fname}")
+                logger.warning(f"[youdao] 图片下载状态码 {resp.status_code}：{fname}")
         except Exception as e:
-            logger.warning(f"[youdao] Image download error: {fname} — {e}")
+            logger.warning(f"[youdao] 图片下载异常：{fname} — {e}")

@@ -50,7 +50,7 @@ class DoctorService:
         name = label or module_name
         try:
             __import__(module_name)
-            return DiagnosticResult(name=name, status="ok", message="available")
+            return DiagnosticResult(name=name, status="ok", message="可用")
         except ImportError as exc:
             return DiagnosticResult(name=name, status="warning", message=str(exc))
 
@@ -66,13 +66,13 @@ class DoctorService:
         for module_name in optional_modules or []:
             checks.append(self.check_import(module_name, label=f"import:{module_name}"))
         output_dir = self.output_dir or Path(os.getenv("OUTPUT_DIR", "./output"))
-        checks.append(self.check_directory("output_dir", output_dir, "output directory"))
-        checks.append(self.check_directory("data_dir", get_data_dir(), "data/session directory"))
+        checks.append(self.check_directory("output_dir", output_dir, "输出目录"))
+        checks.append(self.check_directory("data_dir", get_data_dir(), "数据/登录态目录"))
         checks.append(self.check_proxy_connectivity())
         return DiagnosticSummary(checks=checks)
 
     def check_output_dir(self, output_dir: str | Path) -> DiagnosticResult:
-        return self.check_directory("output_dir", output_dir, "output directory")
+        return self.check_directory("output_dir", output_dir, "输出目录")
 
     def check_directory(self, name: str, directory: str | Path, label: str) -> DiagnosticResult:
         path = Path(directory)
@@ -84,7 +84,7 @@ class DoctorService:
             return DiagnosticResult(
                 name=name,
                 status="ok",
-                message="writable",
+                message="可写",
                 details={"path": str(path), "label": label},
             )
         except Exception as exc:

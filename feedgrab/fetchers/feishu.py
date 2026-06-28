@@ -1746,13 +1746,13 @@ async def _fetch_via_playwright(url: str) -> Dict[str, Any]:
     from feedgrab.config import feishu_cdp_enabled
     if not Path(session_path).exists() and not feishu_cdp_enabled():
         raise RuntimeError(
-            "Feishu session not found. Run: feedgrab login feishu"
+            "未找到飞书登录态。请运行：feedgrab login feishu"
         )
 
     data = await evaluate_feishu_doc(url, session_path)
     if not data or data.get("error"):
-        err = data.get("error", "unknown") if data else "no data"
-        raise RuntimeError(f"Playwright extraction failed: {err}")
+        err = data.get("error", "未知错误") if data else "没有返回数据"
+        raise RuntimeError(f"Playwright 提取失败：{err}")
 
     # Pre-extract embedded sheet data from intercepted client_vars responses.
     # Populate the module-level cache so _render_embedded_block() can use it.
@@ -2244,7 +2244,7 @@ async def fetch_feishu(url: str) -> Dict[str, Any]:
     """
     parsed = parse_feishu_url(url)
     if not parsed:
-        raise ValueError(f"Cannot parse Feishu URL: {url}")
+        raise ValueError(f"无法解析飞书 URL：{url}")
 
     # -- Tier 0: Open API --------------------------------------------------
     if _is_api_available():
@@ -2298,9 +2298,9 @@ async def fetch_feishu(url: str) -> Dict[str, Any]:
         logger.warning(f"[Feishu] Tier 4 Jina failed ({e})")
 
     raise RuntimeError(
-        f"All methods failed for {url}. "
-        "Options: 1) Set FEISHU_APP_ID + FEISHU_APP_SECRET for API access, "
-        "2) Set FEISHU_CDP_ENABLED=true with Chrome --remote-debugging-port, "
-        "3) Run 'feedgrab login feishu' for browser access, "
-        "4) Ensure the document is publicly accessible for Jina fallback."
+        f"飞书文档抓取所有方式都失败：{url}。"
+        "可选处理：1) 配置 FEISHU_APP_ID + FEISHU_APP_SECRET 使用 API；"
+        "2) 设置 FEISHU_CDP_ENABLED=true 并启动带 --remote-debugging-port 的 Chrome；"
+        "3) 运行 'feedgrab login feishu' 保存浏览器登录态；"
+        "4) 确认文档公开可访问，以便 Jina 兜底。"
     )

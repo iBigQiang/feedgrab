@@ -2435,6 +2435,16 @@ def _prompt_cookie_refresh_via_cdp() -> bool:
     print("\n检测到 GraphQL 401/403 错误，当前 Cookie 可能已失效。")
     print(f"✓ Chrome 远程调试端口已检测到 (127.0.0.1:{port})")
 
+    if _is_non_interactive_cookie_refresh_runtime():
+        from feedgrab.config import chrome_cdp_login
+
+        if not chrome_cdp_login():
+            logger.warning("Skipping interactive Twitter cookie refresh in sidecar worker")
+            print("\n当前运行在非交互 worker 中，跳过命令行确认并尝试其他抓取方式...")
+            return False
+        print("\n当前运行在非交互 worker 中，自动通过 CDP 尝试刷新 Cookie...")
+        return _refresh_twitter_cookie_via_cdp()
+
     try:
         response = input("\n是否通过 CDP 自动获取新 Cookie? [Y/n]: ").strip().lower()
         if response and response not in ("y", "yes", ""):
@@ -2444,11 +2454,21 @@ def _prompt_cookie_refresh_via_cdp() -> bool:
         print("\n跳过自动刷新...")
         return False
 
+    return _refresh_twitter_cookie_via_cdp()
+
+
+def _is_non_interactive_cookie_refresh_runtime() -> bool:
+    return any(
+        os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+        for name in ("FEEDGRAB_WORKER_MODE", "FEEDGRAB_DESKTOP_NONINTERACTIVE")
+    )
+
+
+def _refresh_twitter_cookie_via_cdp() -> bool:
     # Perform CDP cookie extraction
     print("\n正在通过 CDP 提取 Cookie...")
     try:
         from feedgrab.login import _login_via_cdp
-        import asyncio
 
         session_path = Path(os.environ.get("FEEDGRAB_DATA_DIR", "sessions")) / "twitter.json"
         ok = _login_via_cdp("twitter", session_path)

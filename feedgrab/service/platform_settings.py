@@ -88,7 +88,7 @@ class PlatformSettingsSchema:
 
 
 LOGIN_CAPABILITIES: dict[str, PlatformLoginCapability] = {
-    "web": PlatformLoginCapability("web", "Web", "not_required"),
+    "web": PlatformLoginCapability("web", "网页", "not_required"),
     "github": PlatformLoginCapability("github", "GitHub", "not_required"),
     "youtube": PlatformLoginCapability("youtube", "YouTube", "not_required"),
     "bilibili": PlatformLoginCapability("bilibili", "Bilibili", "not_required"),
@@ -99,10 +99,10 @@ LOGIN_CAPABILITIES: dict[str, PlatformLoginCapability] = {
     "feishu": PlatformLoginCapability("feishu", "飞书", "required"),
     "kdocs": PlatformLoginCapability("kdocs", "金山文档", "required"),
     "flowus": PlatformLoginCapability("flowus", "FlowUs", "required"),
-    "zhihu": PlatformLoginCapability("zhihu", "Zhihu", "required"),
+    "zhihu": PlatformLoginCapability("zhihu", "知乎", "required"),
     "linuxdo": PlatformLoginCapability("linuxdo", "LinuxDo", "required"),
     "idcflare": PlatformLoginCapability("idcflare", "IDCFlare", "required"),
-    "zsxq": PlatformLoginCapability("zsxq", "Zsxq", "required"),
+    "zsxq": PlatformLoginCapability("zsxq", "知识星球", "required"),
 }
 
 
@@ -113,7 +113,7 @@ PLATFORM_SETTINGS_SCHEMA = PlatformSettingsSchema(
             name="基础设置",
             fields=(
                 PlatformSettingField("OUTPUT_DIR", "path", "输出目录", "core", "./output"),
-                PlatformSettingField("OBSIDIAN_VAULT", "path", "Obsidian Vault（高优先级）", "core"),
+                PlatformSettingField("OBSIDIAN_VAULT", "path", "Obsidian Vault", "core", description="高优先级"),
                 PlatformSettingField("FEEDGRAB_DATA_DIR", "path", "登录态和数据目录", "core", "sessions"),
                 PlatformSettingField("BROWSER_USER_AGENT", "string", "浏览器 User-Agent", "core"),
                 PlatformSettingField("CHROME_CDP_LOGIN", "boolean", "优先从 Chrome CDP 提取登录态", "core", False),
@@ -406,7 +406,7 @@ def get_login_capability(platform: str) -> PlatformLoginCapability:
     normalized = platform.strip().lower()
     return LOGIN_CAPABILITIES.get(
         normalized,
-        PlatformLoginCapability(normalized or platform, platform or "Unknown", "required"),
+        PlatformLoginCapability(normalized or platform, platform or "未知平台", "required"),
     )
 
 

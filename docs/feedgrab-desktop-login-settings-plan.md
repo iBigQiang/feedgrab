@@ -4,7 +4,7 @@
 
 **Goal:** Build the approved desktop login/status/import flow and a schema-driven settings page for feedgrab Desktop.
 
-**Architecture:** Keep CLI behavior and session file formats unchanged. Desktop state is stored under Electron userData; installer-root `sessions` is treated as a read-only import source. Platform settings are defined by a Python schema, persisted to a desktop JSON file, and projected into worker environment variables.
+**Architecture:** Keep CLI behavior and session file formats unchanged. Platform settings are persisted to a desktop JSON file and projected into worker environment variables. In packaged builds, the default `FEEDGRAB_DATA_DIR` points to installer-root `sessions`; users can override it from the settings page.
 
 **Tech Stack:** Electron, Vite, React, TypeScript, Python sidecar worker, pytest, Vitest.
 

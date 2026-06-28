@@ -2,6 +2,7 @@
 """Desktop-worker focused service-layer tests."""
 
 import asyncio
+import json
 import os
 from pathlib import Path
 
@@ -79,6 +80,26 @@ def test_service_redaction_handles_nested_lists_urls_headers_and_cdp_endpoints()
     assert "auth_token" in rendered
     assert "[redacted]" in rendered
     assert "normal=1" in rendered
+
+
+def test_settings_resolves_installed_sessions_dir_for_legacy_relative_saved_value(monkeypatch, tmp_path):
+    from feedgrab.service.settings import SettingsService
+
+    install_sessions = tmp_path / "feedgrab Desktop" / "sessions"
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps({"values": {"FEEDGRAB_DATA_DIR": "\\sessions"}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FEEDGRAB_INSTALL_SESSIONS_DIR", str(install_sessions))
+    monkeypatch.setenv("FEEDGRAB_DATA_DIR", str(tmp_path / "old-sessions"))
+
+    snapshot = SettingsService(settings_path=settings_path).snapshot().to_dict()
+
+    items = {item["name"]: item["value"] for item in snapshot["items"]}
+    assert items["FEEDGRAB_DATA_DIR"] == str(install_sessions)
+    assert items["session_dir"] == str(install_sessions)
+    assert os.environ["FEEDGRAB_DATA_DIR"] == str(install_sessions)
 
 
 def test_job_service_runs_serial_jobs_and_records_artifacts_errors_history_and_cancel():
@@ -435,9 +456,17 @@ def test_settings_schema_update_persist_project_and_snapshot_redacts_secret(monk
     service = SettingsService()
     schema = service.schema().to_dict()
     field_names = {field["name"] for platform in schema["platforms"] for field in platform["fields"]}
+    core_fields = {
+        field["name"]: field
+        for platform in schema["platforms"]
+        if platform["id"] == "core"
+        for field in platform["fields"]
+    }
 
     assert "FEISHU_APP_SECRET" in field_names
     assert "X_SEARCH_DAYS" in field_names
+    assert core_fields["OBSIDIAN_VAULT"]["label"] == "Obsidian Vault"
+    assert core_fields["OBSIDIAN_VAULT"]["description"] == "高优先级"
 
     result = service.update({"FEISHU_APP_SECRET": "super-secret", "X_SEARCH_DAYS": 7}).to_dict()
 
@@ -447,11 +476,117 @@ def test_settings_schema_update_persist_project_and_snapshot_redacts_secret(monk
     assert '"FEISHU_APP_SECRET": "super-secret"' in settings_path.read_text(encoding="utf-8")
 
     snapshot = service.snapshot().to_dict()
+    output_dir = next(item for item in snapshot["items"] if item["name"] == "OUTPUT_DIR")
+    obsidian_vault = next(item for item in snapshot["items"] if item["name"] == "OBSIDIAN_VAULT")
     feishu_secret = next(item for item in snapshot["items"] if item["name"] == "FEISHU_APP_SECRET")
     x_days = next(item for item in snapshot["items"] if item["name"] == "X_SEARCH_DAYS")
 
+    assert output_dir["value"] == "./output"
+    assert obsidian_vault["value"] == ""
+    assert obsidian_vault["source"] == "unset"
     assert feishu_secret["value"] == "[redacted]"
     assert x_days["value"] == "7"
+
+
+def test_desktop_settings_migrates_legacy_default_output_and_vault(monkeypatch, tmp_path):
+    from feedgrab.service.settings import SettingsService
+
+    settings_path = tmp_path / "settings.json"
+    install_output = tmp_path / "install" / "output"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "values": {
+                    "OUTPUT_DIR": "E:\\Obsidian\\Qiang_Obsidian\\inbox",
+                    "OBSIDIAN_VAULT": "E:/Obsidian/Qiang_Obsidian/inbox",
+                    "X_SEARCH_DAYS": 9,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FEEDGRAB_WORKER_MODE", "true")
+    monkeypatch.setenv("OUTPUT_DIR", str(install_output))
+    monkeypatch.setenv("OBSIDIAN_VAULT", "")
+
+    service = SettingsService(settings_path=settings_path)
+    snapshot = service.snapshot().to_dict()
+    output_dir = next(item for item in snapshot["items"] if item["name"] == "OUTPUT_DIR")
+    obsidian_vault = next(item for item in snapshot["items"] if item["name"] == "OBSIDIAN_VAULT")
+    x_days = next(item for item in snapshot["items"] if item["name"] == "X_SEARCH_DAYS")
+    saved = json.loads(settings_path.read_text(encoding="utf-8"))["values"]
+
+    assert output_dir["value"] == str(install_output)
+    assert obsidian_vault["value"] == ""
+    assert x_days["value"] == "9"
+    assert saved["OUTPUT_DIR"] == str(install_output)
+    assert saved["OBSIDIAN_VAULT"] == ""
+    assert saved["X_SEARCH_DAYS"] == 9
+
+
+def test_desktop_settings_migrates_empty_output_and_data_dir_to_install_defaults(monkeypatch, tmp_path):
+    from feedgrab.service.settings import SettingsService
+
+    settings_path = tmp_path / "settings.json"
+    install_output = tmp_path / "feedgrab Desktop" / "output"
+    install_sessions = tmp_path / "feedgrab Desktop" / "sessions"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "values": {
+                    "OUTPUT_DIR": "",
+                    "FEEDGRAB_DATA_DIR": "",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FEEDGRAB_WORKER_MODE", "true")
+    monkeypatch.setenv("OUTPUT_DIR", str(install_output))
+    monkeypatch.setenv("FEEDGRAB_INSTALL_SESSIONS_DIR", str(install_sessions))
+    monkeypatch.setenv("FEEDGRAB_DATA_DIR", str(install_sessions))
+
+    service = SettingsService(settings_path=settings_path)
+    snapshot = service.snapshot().to_dict()
+    items = {item["name"]: item["value"] for item in snapshot["items"]}
+    saved = json.loads(settings_path.read_text(encoding="utf-8"))["values"]
+
+    assert items["OUTPUT_DIR"] == str(install_output)
+    assert items["FEEDGRAB_DATA_DIR"] == str(install_sessions)
+    assert items["session_dir"] == str(install_sessions)
+    assert saved["OUTPUT_DIR"] == str(install_output)
+    assert saved["FEEDGRAB_DATA_DIR"] == str(install_sessions)
+
+
+def test_desktop_settings_keeps_user_custom_output_and_vault(monkeypatch, tmp_path):
+    from feedgrab.service.settings import SettingsService
+
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "values": {
+                    "OUTPUT_DIR": "D:\\WebSite\\yrgs.org",
+                    "OBSIDIAN_VAULT": "D:\\Notes\\Vault",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FEEDGRAB_WORKER_MODE", "true")
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path / "install" / "output"))
+    monkeypatch.setenv("OBSIDIAN_VAULT", "")
+
+    service = SettingsService(settings_path=settings_path)
+    snapshot = service.snapshot().to_dict()
+    output_dir = next(item for item in snapshot["items"] if item["name"] == "OUTPUT_DIR")
+    obsidian_vault = next(item for item in snapshot["items"] if item["name"] == "OBSIDIAN_VAULT")
+    saved = json.loads(settings_path.read_text(encoding="utf-8"))["values"]
+
+    assert output_dir["value"] == "D:\\WebSite\\yrgs.org"
+    assert obsidian_vault["value"] == "D:\\Notes\\Vault"
+    assert saved["OUTPUT_DIR"] == "D:\\WebSite\\yrgs.org"
+    assert saved["OBSIDIAN_VAULT"] == "D:\\Notes\\Vault"
 
 
 def test_proxy_settings_project_standard_environment_and_redact_credentials(monkeypatch, tmp_path):

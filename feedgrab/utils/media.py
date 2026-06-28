@@ -105,9 +105,9 @@ def download_media(
 
     total = len(all_urls)
     if downloaded > 0:
-        logger.info(f"[media] Downloaded {downloaded}/{total} files → attachments/{item_id}/")
+        logger.info(f"[media] 已下载 {downloaded}/{total} 个文件 → attachments/{item_id}/")
     if downloaded < total:
-        logger.warning(f"[media] {total - downloaded} files failed, kept remote URLs")
+        logger.warning(f"[media] {total - downloaded} 个文件下载失败，已保留远程 URL")
 
 
 def _download_file(url: str, dest: Path, headers: dict = None) -> bool:
@@ -123,14 +123,14 @@ def _download_file(url: str, dest: Path, headers: dict = None) -> bool:
 
         data = resp.content
         if not data or len(data) < 100:
-            logger.debug(f"[media] Empty response for {url}")
+            logger.debug(f"[media] 空响应：{url}")
             return False
 
         with open(dest, "wb") as f:
             f.write(data)
         return True
     except Exception as e:
-        logger.debug(f"[media] Download failed: {url} — {e}")
+        logger.debug(f"[media] 下载失败：{url} — {e}")
         return False
 
 

@@ -14,6 +14,8 @@ import type {
   SettingsSchema
 } from "../electron/ipc-types";
 
+const INSTALL_OUTPUT_DIR = "D:\\feedgrab Desktop\\output";
+
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
 });
@@ -47,7 +49,7 @@ describe("App", () => {
           Node.DOCUMENT_POSITION_FOLLOWING
       )
     ).toBe(true);
-    await screen.findByText("浏览器测试 mock worker 已连接。");
+    await screen.findByText("浏览器测试后台工作进程已连接。");
 
     fireEvent.change(screen.getByLabelText("抓取目标（URL / 关键词 / 关键词组 / 账号）"), {
       target: { value: "https://example.com/a\nhttps://example.com/b" }
@@ -55,7 +57,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "开始抓取" }));
 
     expect(screen.getAllByText(/example.com/).length).toBeGreaterThan(0);
-    await screen.findByText("worker 已接收 2 条任务，输出到 D:\\Notes\\Feeds");
+    await screen.findByText(/后台工作进程已接收 2 条任务，输出到/);
     expect(await screen.findAllByText("抓取完成")).toHaveLength(2);
     const logMessages = screen.getAllByTestId("log-message").map((item) => item.textContent ?? "");
     expect(logMessages[0]).toContain("抓取完成");
@@ -96,7 +98,7 @@ describe("App", () => {
           url: 'feedgrab x-so "claude code,openclaw"',
           platform: "twitter",
           status: "running",
-          outputDirectory: "D:\\Notes\\Feeds",
+          outputDirectory: INSTALL_OUTPUT_DIR,
           createdAt: "2026-06-26T09:00:00.000Z"
         }
       ])
@@ -104,6 +106,7 @@ describe("App", () => {
     window.feedgrab = api;
 
     render(<App />);
+    await screen.findByText(INSTALL_OUTPUT_DIR);
 
     fireEvent.click(screen.getByRole("button", { name: "X / Twitter" }));
     fireEvent.change(screen.getByLabelText("抓取目标（URL / 关键词 / 关键词组 / 账号）"), {
@@ -120,7 +123,53 @@ describe("App", () => {
         platform: "twitter",
         mode: "search",
         commandPreview: 'feedgrab x-so "claude code,openclaw"',
-        outputDirectory: "D:\\Notes\\Feeds"
+        outputDirectory: INSTALL_OUTPUT_DIR
+      })
+    );
+  });
+
+  it("uses effective output directory on fetch page and in startFetch payload", async () => {
+    const api = createTestApi({
+      settingsSnapshot: vi.fn().mockResolvedValue({
+        outputDirectory: "D:\\feedgrab Desktop\\output",
+        obsidianVault: "D:\\Notes\\Vault",
+        effectiveOutputDirectory: "D:\\Notes\\Vault",
+        concurrency: 1,
+        downloadImages: true,
+        localizeMedia: true,
+        replyMode: "author"
+      }),
+      startFetch: vi.fn().mockResolvedValue([
+        {
+          id: "job-search",
+          url: 'feedgrab x-so "openclaw"',
+          platform: "twitter",
+          status: "running",
+          outputDirectory: "D:\\Notes\\Vault",
+          createdAt: "2026-06-26T09:00:00.000Z"
+        }
+      ])
+    });
+    window.feedgrab = api;
+
+    render(<App />);
+    await screen.findByText("D:\\Notes\\Vault");
+
+    fireEvent.click(screen.getByRole("button", { name: "X / Twitter" }));
+    fireEvent.change(screen.getByLabelText("抓取目标（URL / 关键词 / 关键词组 / 账号）"), {
+      target: { value: "openclaw" }
+    });
+    expect(screen.getByText("D:\\Notes\\Vault")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "开始抓取" }));
+
+    await waitFor(() =>
+      expect(api.startFetch).toHaveBeenCalledWith({
+        urls: [],
+        targets: ["openclaw"],
+        platform: "twitter",
+        mode: "search",
+        commandPreview: "feedgrab x-so openclaw",
+        outputDirectory: "D:\\Notes\\Vault"
       })
     );
   });
@@ -391,6 +440,12 @@ describe("App", () => {
     expect(screen.queryByText("已创建 https://mp.weixin.qq.com/s/demo 抓取任务")).not.toBeInTheDocument();
   });
 
+  it("keeps the auto-detect job-created notice separated from the textarea", () => {
+    const styles = readFileSync(join(process.cwd(), "renderer", "src", "styles.css"), "utf8");
+
+    expect(styles).toContain("textarea + .inline-notice");
+  });
+
   it("shows structured fetch failure details from worker done events", async () => {
     let workerEvent: ((event: FeedgrabWorkerEvent) => void) | undefined;
     const api = createTestApi({
@@ -438,6 +493,9 @@ describe("App", () => {
     });
 
     expect(await screen.findByText("抓取失败：[openclaw] missing Twitter login")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "任务" }));
+    expect(await screen.findByText('feedgrab x-so "openclaw"')).toBeInTheDocument();
+    expect(screen.queryByText("[openclaw] missing Twitter login")).not.toBeInTheDocument();
   });
 
   it("keeps the realtime log panel pinned to the newest worker status", async () => {
@@ -812,6 +870,19 @@ describe("App", () => {
     const schema: SettingsSchema = {
       basic: [
         { name: "OUTPUT_DIR", label: "输出目录", type: "path", value: "D:\\Notes\\Feeds" },
+        {
+          name: "OBSIDIAN_VAULT",
+          label: "Obsidian Vault",
+          type: "path",
+          value: "D:\\Notes\\Vault",
+          description: "高优先级"
+        },
+        {
+          name: "FEEDGRAB_DATA_DIR",
+          label: "登录态和数据目录",
+          type: "path",
+          value: "D:\\feedgrab Desktop\\sessions"
+        },
         { name: "DOWNLOAD_IMAGES", label: "下载图片", type: "boolean", value: true },
         { name: "FEEDGRAB_PROXY_ENABLED", label: "启用代理", type: "boolean", value: false },
         {
@@ -857,13 +928,38 @@ describe("App", () => {
         }
       ]
     };
-    const api = createTestApi({ settingsSchema: vi.fn().mockResolvedValue(schema) });
+    const chooseOutputDirectory = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, path: "D:\\Notes\\Vault2" })
+      .mockResolvedValueOnce({ ok: true, path: "D:\\feedgrab Desktop\\sessions2" });
+    const api = createTestApi({
+      settingsSchema: vi.fn().mockResolvedValue(schema),
+      chooseOutputDirectory
+    });
     window.feedgrab = api;
 
     render(<App />);
     fireEvent.click(screen.getByText("设置"));
 
     expect(await screen.findByRole("tab", { name: "基础设置" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getAllByLabelText("输出目录")).toHaveLength(1);
+    const outputRow = screen.getByLabelText("输出目录").closest(".schema-setting-row") as HTMLElement;
+    expect(within(outputRow).getByRole("button", { name: "选择" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Obsidian Vault")).toHaveDisplayValue("D:\\Notes\\Vault");
+    expect(screen.getByText("高优先级")).toBeInTheDocument();
+    const vaultRow = screen.getByLabelText("Obsidian Vault").closest(".schema-setting-row") as HTMLElement;
+    fireEvent.click(within(vaultRow).getByRole("button", { name: "选择" }));
+    await waitFor(() =>
+      expect(api.chooseOutputDirectory).toHaveBeenCalledWith({ title: "选择 Obsidian Vault 目录" })
+    );
+    expect(screen.getByLabelText("Obsidian Vault")).toHaveDisplayValue("D:\\Notes\\Vault2");
+    expect(screen.getByLabelText("登录态和数据目录")).toHaveDisplayValue("D:\\feedgrab Desktop\\sessions");
+    const dataDirRow = screen.getByLabelText("登录态和数据目录").closest(".schema-setting-row") as HTMLElement;
+    fireEvent.click(within(dataDirRow).getByRole("button", { name: "选择" }));
+    await waitFor(() =>
+      expect(api.chooseOutputDirectory).toHaveBeenCalledWith({ title: "选择登录态和数据目录" })
+    );
+    expect(screen.getByLabelText("登录态和数据目录")).toHaveDisplayValue("D:\\feedgrab Desktop\\sessions2");
     expect(screen.getByLabelText("下载图片")).toHaveAttribute("type", "checkbox");
     expect(screen.getByLabelText("启用代理")).toHaveAttribute("type", "checkbox");
     expect(screen.getByLabelText("代理地址")).toHaveAttribute(
@@ -901,6 +997,8 @@ describe("App", () => {
         FEEDGRAB_PROXY_ENABLED: true,
         FEEDGRAB_PROXY_URL: "http://user:password@127.0.0.1:7890",
         FEEDGRAB_NO_PROXY: "127.0.0.1,localhost,::1",
+        OBSIDIAN_VAULT: "D:\\Notes\\Vault2",
+        FEEDGRAB_DATA_DIR: "D:\\feedgrab Desktop\\sessions2",
         X_SEARCH_DAYS: 3,
         LINUXDO_REPLY_MODE: "all"
       })
@@ -942,6 +1040,72 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByLabelText("启用代理")).not.toBeChecked());
   });
 
+  it("keeps fallback Obsidian Vault blank instead of copying the output directory", async () => {
+    const api = createTestApi({
+      settingsSnapshot: vi.fn().mockResolvedValue({
+        outputDirectory: "D:\\feedgrab Desktop\\output",
+        obsidianVault: "",
+        effectiveOutputDirectory: "D:\\feedgrab Desktop\\output",
+        concurrency: 1,
+        downloadImages: true,
+        localizeMedia: true,
+        replyMode: "author"
+      }),
+      settingsSchema: vi.fn(() => new Promise<SettingsSchema>(() => undefined))
+    });
+    window.feedgrab = api;
+
+    render(<App />);
+    fireEvent.click(screen.getByText("设置"));
+
+    await waitFor(() => expect(screen.getByLabelText("输出目录")).toHaveDisplayValue("D:\\feedgrab Desktop\\output"));
+    expect(screen.getByLabelText("输出目录")).toHaveDisplayValue("D:\\feedgrab Desktop\\output");
+    expect(screen.getByLabelText("Obsidian Vault")).toHaveDisplayValue("");
+  });
+
+  it("keeps OUTPUT_DIR and OBSIDIAN_VAULT raw values separate in settings schema", async () => {
+    const api = createTestApi({
+      settingsSnapshot: vi.fn().mockResolvedValue({
+        outputDirectory: "D:\\feedgrab Desktop\\output",
+        obsidianVault: "D:\\Notes\\Vault",
+        effectiveOutputDirectory: "D:\\Notes\\Vault",
+        concurrency: 1,
+        downloadImages: true,
+        localizeMedia: true,
+        replyMode: "author"
+      }),
+      settingsSchema: vi.fn(() => new Promise<SettingsSchema>(() => undefined))
+    });
+    window.feedgrab = api;
+
+    render(<App />);
+    fireEvent.click(screen.getByText("设置"));
+
+    expect(await screen.findByLabelText("输出目录")).toHaveDisplayValue("D:\\feedgrab Desktop\\output");
+    expect(screen.getByLabelText("Obsidian Vault")).toHaveDisplayValue("D:\\Notes\\Vault");
+  });
+
+  it("ignores legacy developer output directory persisted in localStorage", async () => {
+    window.localStorage.setItem("feedgrab.outputDirectory", "E:\\Obsidian\\Qiang_Obsidian\\inbox");
+    const api = createTestApi({
+      settingsSnapshot: vi.fn().mockResolvedValue({
+        outputDirectory: "",
+        concurrency: 1,
+        downloadImages: true,
+        localizeMedia: true,
+        replyMode: "author"
+      }),
+      settingsSchema: vi.fn(() => new Promise<SettingsSchema>(() => undefined))
+    });
+    window.feedgrab = api;
+
+    render(<App />);
+    fireEvent.click(screen.getByText("设置"));
+
+    expect(await screen.findByLabelText("输出目录")).toHaveDisplayValue("");
+    expect(window.localStorage.getItem("feedgrab.outputDirectory")).toBeNull();
+  });
+
   it("does not toggle platform boolean settings when clicking blank row space", async () => {
     const api = createTestApi({
       settingsSchema: vi.fn().mockResolvedValue({
@@ -970,7 +1134,7 @@ describe("App", () => {
     expect(checkbox).not.toBeChecked();
   });
 
-  it("starts or verifies Chrome CDP when the basic setting is enabled", async () => {
+  it("does not start Chrome CDP just by opening settings or enabling the setting", async () => {
     const api = createTestApi({
       settingsSchema: vi.fn().mockResolvedValue({
         basic: [
@@ -991,13 +1155,15 @@ describe("App", () => {
 
     render(<App />);
     fireEvent.click(screen.getByText("设置"));
-    fireEvent.click(await screen.findByLabelText("优先从 Chrome CDP 提取登录态"));
+    const checkbox = await screen.findByLabelText("优先从 Chrome CDP 提取登录态");
 
-    await waitFor(() => expect(api.ensureChromeCdp).toHaveBeenCalledWith(9222));
-    await waitFor(() =>
-      expect(api.settingsUpdate).toHaveBeenCalledWith({ CHROME_CDP_LOGIN: true, CHROME_CDP_PORT: 9223 })
-    );
-    expect(await screen.findByTestId("toast")).toHaveTextContent("已启动 Chrome CDP 并连接成功");
+    expect(api.ensureChromeCdp).not.toHaveBeenCalled();
+    fireEvent.click(checkbox);
+    expect(api.ensureChromeCdp).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    await waitFor(() => expect(api.settingsUpdate).toHaveBeenCalledWith({ CHROME_CDP_LOGIN: true }));
+    expect(api.ensureChromeCdp).not.toHaveBeenCalled();
   });
 
   it("keeps browser-preview fallback settings aligned with desktop platform groups", async () => {
@@ -1145,7 +1311,9 @@ function createTestApi(overrides: Partial<FeedgrabIpcApi> = {}): FeedgrabIpcApi 
       notes: []
     }),
     settingsSnapshot: vi.fn().mockResolvedValue({
-      outputDirectory: "D:\\Notes\\Feeds",
+      outputDirectory: INSTALL_OUTPUT_DIR,
+      obsidianVault: "",
+      effectiveOutputDirectory: INSTALL_OUTPUT_DIR,
       concurrency: 1,
       downloadImages: true,
       localizeMedia: true,
@@ -1168,7 +1336,7 @@ function createTestApi(overrides: Partial<FeedgrabIpcApi> = {}): FeedgrabIpcApi 
     repairDoctor: vi.fn().mockResolvedValue({ ok: true, action: "all", message: "依赖已更新" }),
     outputList: vi.fn().mockResolvedValue([]),
     openPath: vi.fn().mockResolvedValue({ ok: true }),
-    chooseOutputDirectory: vi.fn().mockResolvedValue({ ok: true, path: "D:\\Notes\\Feeds" }),
+    chooseOutputDirectory: vi.fn().mockResolvedValue({ ok: true, path: INSTALL_OUTPUT_DIR }),
     fetchRemoteMarkdown: vi.fn().mockResolvedValue({ ok: false, error: "offline" }),
     onWorkerEvent: vi.fn(() => () => undefined),
     ...overrides

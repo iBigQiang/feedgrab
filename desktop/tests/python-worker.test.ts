@@ -1,3 +1,7 @@
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { createMockPythonWorkerClient, createPythonWorkerClient } from "../electron/python-worker";
@@ -86,6 +90,22 @@ describe("createMockPythonWorkerClient", () => {
       })
     ]);
   });
+
+  it("keeps raw output fields and computes effective output directory for mock snapshots", async () => {
+    const worker = createMockPythonWorkerClient();
+
+    const snapshot = await worker.settingsSnapshot();
+
+    expect(snapshot).toMatchObject({
+      outputDirectory: "",
+      obsidianVault: "",
+      effectiveOutputDirectory: "",
+      concurrency: 2,
+      downloadImages: true,
+      localizeMedia: true,
+      replyMode: "author"
+    });
+  });
 });
 
 describe("createPythonWorkerClient protocol mapping", () => {
@@ -157,6 +177,18 @@ describe("createPythonWorkerClient protocol mapping", () => {
             method: request.method,
             result: { updated: Object.entries(request.params.values).map(([name, value]) => ({ name, value: String(value) })) }
           }) + "\\n");
+        } else if (request.method === "settings_snapshot") {
+          process.stdout.write(JSON.stringify({
+            id: request.id,
+            event: "done",
+            method: request.method,
+            result: {
+              items: [
+                { name: "OUTPUT_DIR", value: "D:\\\\Notes\\\\Outputs" },
+                { name: "OBSIDIAN_VAULT", value: "D:\\\\Notes\\\\Vault" }
+              ]
+            }
+          }) + "\\n");
         } else {
           process.stdout.write(JSON.stringify({
             id: request.id,
@@ -198,6 +230,15 @@ describe("createPythonWorkerClient protocol mapping", () => {
     });
     await expect(worker.settingsUpdate({ X_SEARCH_DAYS: 7 })).resolves.toMatchObject({
       updated: [{ name: "X_SEARCH_DAYS", value: "7" }]
+    });
+    await expect(worker.settingsSnapshot()).resolves.toEqual({
+      outputDirectory: "D:\\Notes\\Outputs",
+      obsidianVault: "D:\\Notes\\Vault",
+      effectiveOutputDirectory: "D:\\Notes\\Vault",
+      concurrency: 1,
+      downloadImages: true,
+      localizeMedia: true,
+      replyMode: "author"
     });
   });
 
@@ -283,5 +324,238 @@ describe("createPythonWorkerClient protocol mapping", () => {
       imported: [],
       error: expect.stringContaining("sessions")
     });
+  });
+
+  it("projects saved settings into the login subprocess environment", async () => {
+    const tempRoot = mkdtempSync(path.join(tmpdir(), "feedgrab-login-env-"));
+    const settingsPath = path.join(tempRoot, "settings.json");
+    const outputPath = path.join(tempRoot, "login-env.json");
+    writeFileSync(
+      path.join(tempRoot, "login"),
+      `
+        const fs = require("node:fs");
+        fs.writeFileSync(${JSON.stringify(outputPath)}, JSON.stringify({
+          argv: process.argv.slice(2),
+          dataDir: process.env.FEEDGRAB_DATA_DIR || "",
+          outputDir: process.env.OUTPUT_DIR || "",
+          obsidianVault: process.env.OBSIDIAN_VAULT || ""
+        }));
+      `,
+      "utf8"
+    );
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        values: {
+          FEEDGRAB_DATA_DIR: "\\sessions",
+          OUTPUT_DIR: "D:\\Notes\\Feeds"
+        }
+      }),
+      "utf8"
+    );
+
+    const worker = createPythonWorkerClient({
+      command: process.execPath,
+      args: [],
+      cwd: tempRoot,
+      env: {
+        FEEDGRAB_SETTINGS_PATH: settingsPath,
+        FEEDGRAB_INSTALL_SESSIONS_DIR: "D:\\feedgrab Desktop\\sessions",
+        FEEDGRAB_DATA_DIR: "C:\\Users\\Qiang\\AppData\\Roaming\\feedgrab-desktop\\sessions"
+      }
+    });
+
+    await expect(worker.loginPlatform("feishu")).resolves.toMatchObject({
+      ok: true,
+      platform: "feishu"
+    });
+
+    const captured = JSON.parse(readFileSync(outputPath, "utf8")) as {
+      argv: string[];
+      dataDir: string;
+      outputDir: string;
+      obsidianVault: string;
+    };
+    expect(captured.argv).toEqual(["feishu"]);
+    expect(captured.dataDir).toBe("D:\\feedgrab Desktop\\sessions");
+    expect(captured.outputDir).toBe("D:\\Notes\\Feeds");
+    expect(captured.obsidianVault).toBe("");
+  });
+
+  it("does not project legacy desktop defaults into the login subprocess environment", async () => {
+    const tempRoot = mkdtempSync(path.join(tmpdir(), "feedgrab-login-legacy-env-"));
+    const settingsPath = path.join(tempRoot, "settings.json");
+    const outputPath = path.join(tempRoot, "login-env.json");
+    writeFileSync(
+      path.join(tempRoot, "login"),
+      `
+        const fs = require("node:fs");
+        fs.writeFileSync(${JSON.stringify(outputPath)}, JSON.stringify({
+          dataDir: process.env.FEEDGRAB_DATA_DIR || "",
+          outputDir: process.env.OUTPUT_DIR || "",
+          obsidianVault: process.env.OBSIDIAN_VAULT || ""
+        }));
+      `,
+      "utf8"
+    );
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        values: {
+          OUTPUT_DIR: "E:\\Obsidian\\Qiang_Obsidian\\inbox",
+          OBSIDIAN_VAULT: "E:\\Obsidian\\Qiang_Obsidian\\inbox",
+          FEEDGRAB_DATA_DIR: ""
+        }
+      }),
+      "utf8"
+    );
+
+    const worker = createPythonWorkerClient({
+      command: process.execPath,
+      args: [],
+      cwd: tempRoot,
+      env: {
+        FEEDGRAB_SETTINGS_PATH: settingsPath,
+        FEEDGRAB_INSTALL_SESSIONS_DIR: "D:\\feedgrab Desktop\\sessions",
+        FEEDGRAB_DATA_DIR: "C:\\Users\\Qiang\\AppData\\Roaming\\feedgrab Desktop\\sessions",
+        OUTPUT_DIR: "D:\\feedgrab Desktop\\output",
+        OBSIDIAN_VAULT: ""
+      }
+    });
+
+    await expect(worker.loginPlatform("feishu")).resolves.toMatchObject({
+      ok: true,
+      platform: "feishu"
+    });
+
+    const captured = JSON.parse(readFileSync(outputPath, "utf8")) as {
+      dataDir: string;
+      outputDir: string;
+      obsidianVault: string;
+    };
+    expect(captured.dataDir).toBe("D:\\feedgrab Desktop\\sessions");
+    expect(captured.outputDir).toBe("D:\\feedgrab Desktop\\output");
+    expect(captured.obsidianVault).toBe("");
+  });
+
+  it("projects empty saved desktop output to the install output directory", async () => {
+    const tempRoot = mkdtempSync(path.join(tmpdir(), "feedgrab-login-empty-output-env-"));
+    const settingsPath = path.join(tempRoot, "settings.json");
+    const outputPath = path.join(tempRoot, "login-env.json");
+    writeFileSync(
+      path.join(tempRoot, "login"),
+      `
+        const fs = require("node:fs");
+        fs.writeFileSync(${JSON.stringify(outputPath)}, JSON.stringify({
+          outputDir: process.env.OUTPUT_DIR || ""
+        }));
+      `,
+      "utf8"
+    );
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        values: {
+          OUTPUT_DIR: ""
+        }
+      }),
+      "utf8"
+    );
+
+    const worker = createPythonWorkerClient({
+      command: process.execPath,
+      args: [],
+      cwd: tempRoot,
+      env: {
+        FEEDGRAB_SETTINGS_PATH: settingsPath,
+        OUTPUT_DIR: "D:\\feedgrab Desktop\\output"
+      }
+    });
+
+    await expect(worker.loginPlatform("feishu")).resolves.toMatchObject({
+      ok: true,
+      platform: "feishu"
+    });
+
+    const captured = JSON.parse(readFileSync(outputPath, "utf8")) as { outputDir: string };
+    expect(captured.outputDir).toBe("D:\\feedgrab Desktop\\output");
+  });
+
+  it("uses runtime env for fallback settings schema when sidecar schema fails", async () => {
+    const script = `
+      const readline = require("node:readline");
+      const rl = readline.createInterface({ input: process.stdin });
+      rl.on("line", (line) => {
+        const request = JSON.parse(line);
+        process.stdout.write(JSON.stringify({
+          id: request.id,
+          event: "error",
+          method: request.method,
+          error: { code: "schema_failed", message: "schema failed" }
+        }) + "\\n");
+      });
+    `;
+    const worker = createPythonWorkerClient({
+      command: process.execPath,
+      args: ["-e", script],
+      env: {
+        OUTPUT_DIR: "D:\\feedgrab Desktop\\output",
+        FEEDGRAB_DATA_DIR: "D:\\feedgrab Desktop\\sessions",
+        FEEDGRAB_INSTALL_SESSIONS_DIR: "D:\\feedgrab Desktop\\sessions"
+      }
+    });
+
+    const schema = await worker.settingsSchema();
+    const basicFields = Object.fromEntries(schema.basic.map((field) => [field.name, field]));
+
+    expect(basicFields.OUTPUT_DIR?.value).toBe("D:\\feedgrab Desktop\\output");
+    expect(basicFields.FEEDGRAB_DATA_DIR?.label).toBe("登录态和数据目录");
+    expect(basicFields.FEEDGRAB_DATA_DIR?.value).toBe("D:\\feedgrab Desktop\\sessions");
+  });
+
+  it("marks running fetch jobs failed when the sidecar process exits", async () => {
+    const script = `
+      const readline = require("node:readline");
+      const rl = readline.createInterface({ input: process.stdin });
+      rl.on("line", (line) => {
+        const request = JSON.parse(line);
+        process.stdout.write(JSON.stringify({
+          id: request.id,
+          event: "job_started",
+          method: "fetch",
+          result: { total: 1 }
+        }) + "\\n");
+        process.stdout.write(JSON.stringify({
+          id: request.id,
+          event: "progress",
+          method: "fetch",
+          url: request.params.urls[0],
+          message: "fetching"
+        }) + "\\n");
+        setTimeout(() => process.exit(7), 10);
+      });
+    `;
+    const worker = createPythonWorkerClient({
+      command: process.execPath,
+      args: ["-e", script]
+    });
+    const events: Array<{ id?: string | null; event: string; method?: string }> = [];
+    worker.onEvent((event) => events.push(event));
+
+    const jobs = await worker.startFetch({
+      urls: ["https://x.com/thinkszyg/status/2061278800491729292"],
+      outputDirectory: "D:\\Notes\\Feeds"
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: jobs[0]?.id,
+          event: "error",
+          method: "fetch"
+        })
+      ])
+    );
   });
 });

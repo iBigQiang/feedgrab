@@ -34,6 +34,14 @@ from feedgrab.utils.dedup import (
     get_index_path,
 )
 
+MPWEIXIN_LOGIN_COMMAND = "'feedgrab login wechat'"
+MPWEIXIN_SESSION_EXPIRED_MESSAGE = (
+    f"微信公众号后台登录态已过期或无效。请运行 {MPWEIXIN_LOGIN_COMMAND} 重新登录。"
+)
+MPWEIXIN_SESSION_MISSING_MESSAGE = (
+    f"微信公众号后台登录态文件不存在。请先运行 {MPWEIXIN_LOGIN_COMMAND}。"
+)
+
 
 # ---------------------------------------------------------------------------
 # Progress cache — resume after interruption
@@ -155,7 +163,7 @@ async def _fetch_article_list(page, fakeid: str, begin: int = 0,
 
     ret = data.get("base_resp", {}).get("ret", -1)
     if ret == 200003:
-        raise RuntimeError("MP session expired — run 'feedgrab login wechat' to re-login")
+        raise RuntimeError(MPWEIXIN_SESSION_EXPIRED_MESSAGE)
     if ret != 0:
         logger.error(f"[mpweixin-id] appmsgpublish failed: ret={ret}")
         return [], True, 0
@@ -215,9 +223,7 @@ async def fetch_account_articles(
 
     session_path = get_session_dir() / "wechat.json"
     if not session_path.exists():
-        raise RuntimeError(
-            "WeChat MP session not found. Run 'feedgrab login wechat' first."
-        )
+        raise RuntimeError(MPWEIXIN_SESSION_MISSING_MESSAGE)
 
     since_ts = 0
     if since:
@@ -263,16 +269,14 @@ async def fetch_account_articles(
             # Check if session is valid (should redirect to home with token)
             current_url = page.url
             if "token=" not in current_url:
-                raise RuntimeError(
-                    "MP session expired or invalid. Run 'feedgrab login wechat' to re-login."
-                )
+                raise RuntimeError(MPWEIXIN_SESSION_EXPIRED_MESSAGE)
             logger.info("[mpweixin-id] Session valid")
 
             # Step 1: Find account
             logger.info(f"[mpweixin-id] Searching account: {account_name}")
             account = await _find_account(page, account_name)
             if not account:
-                raise RuntimeError(f"Account not found: {account_name}")
+                raise RuntimeError(f"未找到公众号：{account_name}")
 
             fakeid = account["fakeid"]
             nickname = account.get("nickname", account_name)

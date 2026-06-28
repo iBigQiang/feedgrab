@@ -58,19 +58,26 @@ export function resolveFeedgrabRuntime(options: FeedgrabRuntimeOptions): Feedgra
   const installSessionsPath = bundledWorkerAvailable
     ? path.join(packagedInstallRoot, "sessions")
     : path.join(options.projectRoot, "desktop", "sessions");
+  const installOutputPath = bundledWorkerAvailable
+    ? path.join(packagedInstallRoot, "output")
+    : path.join(options.projectRoot, "output");
   const browserPath = bundledBrowserAvailable ? bundledBrowserPath : managedBrowserPath;
+  const runtimeSettingsPath = bundledWorkerAvailable ? settingsPath : env.FEEDGRAB_SETTINGS_PATH || settingsPath;
   const baseEnv: NodeJS.ProcessEnv = {
     ...env,
     FEEDGRAB_DESKTOP_RUNTIME_ROOT: runtimeRoot,
-    FEEDGRAB_INSTALL_SESSIONS_DIR: env.FEEDGRAB_INSTALL_SESSIONS_DIR || installSessionsPath,
+    FEEDGRAB_WORKER_MODE: "true",
+    FEEDGRAB_INSTALL_SESSIONS_DIR: bundledWorkerAvailable
+      ? installSessionsPath
+      : env.FEEDGRAB_INSTALL_SESSIONS_DIR || installSessionsPath,
     FEEDGRAB_PROJECT_SESSIONS_DIR: env.FEEDGRAB_PROJECT_SESSIONS_DIR || path.join(options.projectRoot, "sessions"),
-    FEEDGRAB_SETTINGS_PATH: env.FEEDGRAB_SETTINGS_PATH || settingsPath,
+    FEEDGRAB_SETTINGS_PATH: runtimeSettingsPath,
     PLAYWRIGHT_BROWSERS_PATH: browserPath,
     PLAYWRIGHT_SKIP_BROWSER_GC: "1",
     PYTHONIOENCODING: "utf-8",
     ...(defaultBrowserUserAgent ? { BROWSER_USER_AGENT: defaultBrowserUserAgent } : {})
   };
-  const envWithProxy = projectProxyEnvironment(baseEnv, env.FEEDGRAB_SETTINGS_PATH || settingsPath);
+  const envWithProxy = projectProxyEnvironment(baseEnv, runtimeSettingsPath);
 
   if (bundledWorkerAvailable) {
     return {
@@ -80,8 +87,9 @@ export function resolveFeedgrabRuntime(options: FeedgrabRuntimeOptions): Feedgra
       cwd: options.userDataPath,
       env: {
         ...envWithProxy,
-        FEEDGRAB_DATA_DIR: env.FEEDGRAB_DATA_DIR || path.join(options.userDataPath, "sessions"),
-        OUTPUT_DIR: env.OUTPUT_DIR || path.join(options.userDataPath, "output")
+        FEEDGRAB_DATA_DIR: installSessionsPath,
+        OBSIDIAN_VAULT: "",
+        OUTPUT_DIR: installOutputPath
       },
       runtimeRoot,
       workerPath,

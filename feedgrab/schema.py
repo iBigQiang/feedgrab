@@ -247,6 +247,21 @@ def _has_article_body(article_data: dict) -> bool:
     return bool(body and len(body.strip()) > 200)
 
 
+def _clean_twitter_title(text: str, max_len: int = 50) -> str:
+    """Collapse tweet text into a short, single-line title."""
+    text = re.sub(r'\*{1,3}', '', text or "")
+    text = re.sub(r'[\r\n\t]+', '', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    if len(text) <= max_len:
+        return text
+
+    candidate = text[:max_len]
+    for i in range(len(candidate) - 1, max_len // 3 - 1, -1):
+        if candidate[i] in "。！？.!?":
+            return candidate[:i + 1]
+    return candidate
+
+
 def from_twitter(data: dict) -> UnifiedContent:
     # If thread data is present, assemble rich content from all tweets
     tweets = data.get("thread_tweets", [])
@@ -295,10 +310,12 @@ def from_twitter(data: dict) -> UnifiedContent:
     else:
         tweet_type = "status"
 
+    title = _clean_twitter_title(data.get("title") or data.get("text", ""))
+
     return UnifiedContent(
         source_type=SourceType.TWITTER,
         source_name=data.get("author", ""),
-        title=data.get("title", re.sub(r'[\r\n\t]+', '', data.get("text", ""))[:50]),
+        title=title,
         content=content,
         url=data.get("url", ""),
         tags=data.get("hashtags", []),

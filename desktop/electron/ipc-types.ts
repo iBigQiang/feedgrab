@@ -118,6 +118,8 @@ export type DoctorRepairResult = {
 
 export type SettingsSnapshot = {
   outputDirectory: string;
+  obsidianVault: string;
+  effectiveOutputDirectory: string;
   concurrency: number;
   downloadImages: boolean;
   localizeMedia: boolean;
@@ -230,6 +232,10 @@ export type DirectorySelectionResult = {
   error?: string;
 };
 
+export type DirectorySelectionOptions = {
+  title?: string;
+};
+
 export type RemoteMarkdownResult = {
   ok: boolean;
   markdown?: string;
@@ -262,7 +268,7 @@ export type FeedgrabIpcApi = {
   loginPlatform: (platform: SupportedPlatform) => Promise<LoginPlatformResult>;
   outputList: () => Promise<OutputArtifact[]>;
   openPath: (path: string) => Promise<OpenPathResult>;
-  chooseOutputDirectory: () => Promise<DirectorySelectionResult>;
+  chooseOutputDirectory: (options?: DirectorySelectionOptions) => Promise<DirectorySelectionResult>;
   fetchRemoteMarkdown: (url: string) => Promise<RemoteMarkdownResult>;
   onWorkerEvent: (callback: (event: FeedgrabWorkerEvent) => void) => () => void;
 };

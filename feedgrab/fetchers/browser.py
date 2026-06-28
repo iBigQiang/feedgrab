@@ -847,8 +847,8 @@ async def fetch_wechat_comments(page, comment_id: str, appmsg_token: str = "",
     if ret != 0:
         errmsg = raw.get("errmsg", "unknown")
         logger.warning(
-            f"[wechat-comment] API rejected (ret={ret}, {errmsg}). "
-            "WeChat comments require client session — not available in regular browser."
+            f"[wechat-comment] API 拒绝请求（ret={ret}, {errmsg}）。"
+            "微信公众号评论需要微信客户端登录态，普通浏览器登录态不可用。"
         )
         return []
 
@@ -889,7 +889,7 @@ async def fetch_wechat_comments(page, comment_id: str, appmsg_token: str = "",
 
 def get_session_path(platform: str) -> str:
     """Get the session file path for a platform."""
-    return str(SESSION_DIR / f"{platform}.json")
+    return str(get_session_dir() / f"{platform}.json")
 
 
 # ---------------------------------------------------------------------------

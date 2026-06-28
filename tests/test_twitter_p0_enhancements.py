@@ -42,6 +42,45 @@ def test_tweet_tombstone_returns_none_and_logs():
     assert extract_tweet_data(entry) is None
 
 
+def test_cookie_refresh_uses_cdp_without_input_in_worker_mode(monkeypatch, tmp_path):
+    import builtins
+    import urllib.request
+
+    import feedgrab.fetchers.twitter_graphql as twitter_graphql
+    import feedgrab.login as login_module
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    captured = []
+
+    monkeypatch.setenv("FEEDGRAB_WORKER_MODE", "true")
+    monkeypatch.setenv("CHROME_CDP_LOGIN", "true")
+    monkeypatch.setenv("FEEDGRAB_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(twitter_graphql, "_last_cookie_prompt_time", 0)
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr(
+        builtins,
+        "input",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("input should not be called")),
+    )
+
+    def fake_login_via_cdp(platform, session_path):
+        captured.append((platform, session_path))
+        return True
+
+    monkeypatch.setattr(login_module, "_login_via_cdp", fake_login_via_cdp)
+
+    assert twitter_graphql._prompt_cookie_refresh_via_cdp() is True
+    assert captured == [("twitter", tmp_path / "twitter.json")]
+
+
 def test_tweet_unavailable_returns_none():
     entry = _wrap_entry({
         "__typename": "TweetUnavailable",

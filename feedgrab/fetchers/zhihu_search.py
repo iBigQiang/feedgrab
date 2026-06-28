@@ -418,7 +418,7 @@ def _generate_summary_table(
     ]
 
     if not items:
-        lines.append("*No results found.*")
+        lines.append("*未找到结果。*")
     else:
         if show_keyword:
             lines.append("| # | 关键词 | 作者 | 标题 | 赞数 | 评论 | 日期 |")
@@ -522,8 +522,8 @@ async def search_zhihu_keyword(
             logger.warning(f"[zhihu-so] Playwright search failed: {e}")
 
     if not items:
-        logger.warning(f"[zhihu-so] No results found for '{keyword}'")
-        logger.warning("   Tip: Run 'feedgrab login zhihu' to save session, then retry.")
+        logger.warning(f"[zhihu-so] 未找到结果：'{keyword}'")
+        logger.warning("   提示：请运行 'feedgrab login zhihu' 保存登录态后重试。")
         return {"total": 0, "saved": 0, "query": keyword, "items": []}
 
     # Generate summary table

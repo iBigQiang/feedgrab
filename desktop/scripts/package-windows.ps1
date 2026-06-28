@@ -1,6 +1,9 @@
 param(
     [ValidateSet("portable", "nsis", "all")]
-    [string]$Target = "all"
+    [string]$Target = "all",
+    [string]$Python = "python",
+    [switch]$SkipRuntimeBuild,
+    [switch]$SkipRuntimeInstall
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,6 +15,11 @@ $OutputDir = Join-Path $DesktopRoot "release-packages\$Stamp"
 
 if (-not (Test-Path -LiteralPath $Builder)) {
     throw "electron-builder was not found. Run npm install in $DesktopRoot first."
+}
+
+if (-not $SkipRuntimeBuild) {
+    Write-Host "Building feedgrab desktop runtime..."
+    & (Join-Path $PSScriptRoot "build-runtime.ps1") -Python $Python -SkipInstall:$SkipRuntimeInstall
 }
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null

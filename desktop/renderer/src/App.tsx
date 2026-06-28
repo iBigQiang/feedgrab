@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useReducer, useRef, useState, type Dispatch, type ReactElement, type ReactNode } from "react";
 
 import type {
-  ChromeCdpEnsureResult,
   DoctorSnapshot,
   FeedgrabIpcApi,
   FeedgrabWorkerEvent,
@@ -88,7 +87,7 @@ type FetchPlatformOption = {
 };
 
 const fetchPlatformOptions: FetchPlatformOption[] = [
-  { key: "auto", id: "auto", label: "自动识别" },
+  { key: "auto", id: "auto", label: "URL自动识别" },
   { key: "twitter", id: "twitter", label: "X / Twitter", command: "x-so", mode: "search" },
   { key: "wechat", id: "wechat", label: "微信公众号", command: "mpweixin-id", mode: "account" },
   { key: "xhs", id: "xhs", label: "小红书", command: "xhs-so", mode: "search" },
@@ -100,7 +99,7 @@ const fetchPlatformOptions: FetchPlatformOption[] = [
   { key: "feishu", id: "feishu", label: "飞书" },
   { key: "kdocs", id: "kdocs", label: "金山文档" },
   { key: "flowus", id: "flowus", label: "FlowUs" },
-  { key: "youdao", id: "web", label: "有道云笔记" },
+  { key: "youdao", id: "web", label: "有道云" },
   { key: "zhihu", id: "zhihu", label: "知乎", command: "zhihu-so", mode: "search" },
   { key: "zsxq", id: "zsxq", label: "知识星球" },
   { key: "xiaoyuzhou", id: "web", label: "小宇宙" },
@@ -112,6 +111,8 @@ const fetchPlatformOptions: FetchPlatformOption[] = [
 ];
 
 const compactBasicSettingNames = new Set(["CHROME_CDP_LOGIN", "CHROME_CDP_PORT", "FORCE_REFETCH"]);
+const pathPickerSettingNames = new Set(["OUTPUT_DIR", "OBSIDIAN_VAULT", "FEEDGRAB_DATA_DIR"]);
+const legacyDesktopDefaultPaths = new Set(["e:\\obsidian\\qiang_obsidian\\inbox"]);
 
 type FetchPlan = {
   urls: string[];
@@ -260,8 +261,8 @@ export function App(): ReactElement {
             level: "success",
             message:
               ping.worker === "python"
-                ? "Python sidecar worker 已连接。"
-                : "浏览器测试 mock worker 已连接。"
+                ? "Python 后台工作进程已连接。"
+                : "浏览器测试后台工作进程已连接。"
           }
         })
       )
@@ -270,17 +271,15 @@ export function App(): ReactElement {
           type: "job/log",
           payload: {
             level: "error",
-            message: error instanceof Error ? error.message : "worker 连接失败"
+            message: error instanceof Error ? error.message : "后台工作进程连接失败"
           }
         })
       );
     void api.settingsSnapshot().then((settings) =>
       dispatch({
         type: "settings/load",
-        payload: {
-          ...settings,
-          outputDirectory: settings.outputDirectory || loadSavedOutputDirectory()
-        }
+        payload: settings,
+        resolvedOutputDirectory: settings.effectiveOutputDirectory || settings.outputDirectory || loadSavedOutputDirectory()
       })
     );
     void api.settingsSchema().then((schema) => dispatch({ type: "settings/schema", payload: schema }));
@@ -328,7 +327,7 @@ export function App(): ReactElement {
           payload: {
             jobId: jobs[0]?.id,
             level: "info",
-            message: `worker 已接收 ${jobs.length} 条任务，输出到 ${state.outputDirectory}`
+            message: `后台工作进程已接收 ${jobs.length} 条任务，输出到 ${state.outputDirectory}`
           }
         });
       })
@@ -337,7 +336,7 @@ export function App(): ReactElement {
           type: "job/log",
           payload: {
             level: "error",
-            message: error instanceof Error ? error.message : "worker 调用失败"
+            message: error instanceof Error ? error.message : "后台工作进程调用失败"
           }
         });
       });
@@ -349,14 +348,28 @@ export function App(): ReactElement {
   }
 
   function chooseOutputDirectory(): void {
-    void api.chooseOutputDirectory().then((result) => {
+    chooseDirectoryForSetting("OUTPUT_DIR");
+  }
+
+  function chooseDirectoryForSetting(name: string): void {
+    const title =
+      name === "OBSIDIAN_VAULT"
+        ? "选择 Obsidian Vault 目录"
+        : name === "FEEDGRAB_DATA_DIR"
+          ? "选择登录态和数据目录"
+          : "选择 feedgrab 输出目录";
+    void api.chooseOutputDirectory({ title }).then((result) => {
       if (result.ok && result.path) {
-        saveOutputDirectory(result.path);
-        dispatch({ type: "settings/outputDirectory", payload: result.path });
-        void api
-          .settingsUpdate({ OUTPUT_DIR: result.path })
-          .then(() => refreshSettingsFromWorker())
-          .catch(() => undefined);
+        if (name === "OUTPUT_DIR") {
+          saveOutputDirectory(result.path);
+          dispatch({ type: "settings/outputDirectory", payload: result.path });
+          void api
+            .settingsUpdate({ OUTPUT_DIR: result.path })
+            .then(() => refreshSettingsFromWorker())
+            .catch(() => undefined);
+          return;
+        }
+        dispatch({ type: "settings/edit", payload: { name, value: result.path } });
       }
     });
   }
@@ -410,7 +423,7 @@ export function App(): ReactElement {
   }
 
   function loginPlatform(platform: SupportedPlatform): void {
-    showToast(`已打开 ${platformLabel(platform)} 登录窗口，登录成功后关闭浏览器，客户端会保存登录态。`, "info");
+    showToast(`正在打开 ${platformLabel(platform)} 登录流程，登录成功后客户端会保存登录态。`, "info");
     void api
       .loginPlatform(platform)
       .then((result) => {
@@ -470,27 +483,12 @@ export function App(): ReactElement {
 
   async function refreshSettingsFromWorker(): Promise<void> {
     const [settings, schema] = await Promise.all([api.settingsSnapshot(), api.settingsSchema()]);
-    dispatch({ type: "settings/load", payload: settings });
-    dispatch({ type: "settings/schema", payload: schema });
-  }
-
-  async function ensureChromeCdpForSettings(portValue?: SettingsFieldValue): Promise<ChromeCdpEnsureResult> {
-    const port = normalizePortValue(portValue);
-    const result = await api.ensureChromeCdp(port);
-    showToast(result.message, result.ok ? "success" : "warning");
-    if (!result.ok) {
-      return result;
-    }
-    const update = await api.settingsUpdate({
-      CHROME_CDP_LOGIN: true,
-      CHROME_CDP_PORT: result.port
+    dispatch({
+      type: "settings/load",
+      payload: settings,
+      resolvedOutputDirectory: settings.effectiveOutputDirectory || settings.outputDirectory || loadSavedOutputDirectory()
     });
-    if (!update.ok) {
-      showToast(update.error ?? "Chrome CDP 状态已确认，但设置写入失败", "warning");
-      return result;
-    }
-    await refreshSettingsFromWorker();
-    return result;
+    dispatch({ type: "settings/schema", payload: schema });
   }
 
   function showToast(message: string, tone: "info" | "success" | "warning" | "error" = "info"): void {
@@ -504,7 +502,7 @@ export function App(): ReactElement {
           <img className="brand-mark brand-icon" src={appIconUrl} alt="" aria-hidden="true" />
           <div>
             <strong>feedgrab</strong>
-            <small>Desktop</small>
+            <small>桌面版</small>
           </div>
         </div>
         <nav className="nav-list">
@@ -623,9 +621,8 @@ export function App(): ReactElement {
             settingsSchema={state.settingsSchema}
             pendingSettings={state.pendingSettings}
             outputDirectory={state.outputDirectory}
-            chooseOutputDirectory={chooseOutputDirectory}
+            chooseDirectoryForSetting={chooseDirectoryForSetting}
             updateSetting={updateSetting}
-            ensureChromeCdp={ensureChromeCdpForSettings}
             saveSettings={saveSettings}
           />
         ) : null}
@@ -710,6 +707,7 @@ function JobsView(props: { jobs: UiJob[]; cancelJob: (job: UiJob) => void }): Re
         const artifactCount = job.artifactPaths.length;
         const latestArtifactPath = job.markdownPath ?? job.artifactPaths.at(-1);
         const summaryMessage = job.lastMessage ?? statusLabel(job.status);
+        const errorDetail = job.error && !summaryMessage.includes(job.error) ? job.error : undefined;
         return (
           <article className="job-row" key={job.id}>
             <div className="job-main">
@@ -717,7 +715,7 @@ function JobsView(props: { jobs: UiJob[]; cancelJob: (job: UiJob) => void }): Re
               <div className="job-summary" aria-label="任务进度">
                 <span className="job-message">{summaryMessage}</span>
                 {artifactCount > 0 ? <span className="job-artifact-count">已保存 {artifactCount} 个 Markdown</span> : null}
-                {job.error ? <span className="job-error">{job.error}</span> : null}
+                {errorDetail ? <span className="job-error">{errorDetail}</span> : null}
               </div>
               {latestArtifactPath ? <code className="job-artifact-path">{latestArtifactPath}</code> : null}
             </div>
@@ -844,45 +842,19 @@ function SettingsView(props: {
   settingsSchema?: SettingsSchema;
   pendingSettings: Record<string, SettingsFieldValue>;
   outputDirectory: string;
-  chooseOutputDirectory: () => void;
+  chooseDirectoryForSetting: (name: string) => void;
   updateSetting: (name: string, value: SettingsFieldValue) => void;
-  ensureChromeCdp: (port?: SettingsFieldValue) => Promise<ChromeCdpEnsureResult>;
   saveSettings: () => void;
 }): ReactElement {
   const [activeTab, setActiveTab] = useState<"basic" | "platform">("basic");
   const [activePlatformId, setActivePlatformId] = useState("");
-  const chromeCdpEnsureKeyRef = useRef("");
   const settings = props.settings;
-  const schema = props.settingsSchema ?? settingsSchemaFromSnapshot(settings, props.outputDirectory);
+  const schema = props.settingsSchema ?? settingsSchemaFromSnapshot(settings);
   const activePlatform = schema.platforms.find((platform) => platform.id === activePlatformId) ?? schema.platforms[0];
   const primaryBasicFields = schema.basic.filter((field) => !compactBasicSettingNames.has(field.name));
   const compactBasicFields = schema.basic.filter((field) => compactBasicSettingNames.has(field.name));
-  const chromeCdpLoginField = schema.basic.find((field) => field.name === "CHROME_CDP_LOGIN");
-  const chromeCdpPortField = schema.basic.find((field) => field.name === "CHROME_CDP_PORT");
-  const chromeCdpEnabled = settingBooleanValue(getSettingFieldValue(chromeCdpLoginField, props.pendingSettings));
-  const chromeCdpPort = getSettingFieldValue(chromeCdpPortField, props.pendingSettings);
   const activePlatformGroups = activePlatform ? groupPlatformSettings(activePlatform) : [];
-  const ensureChromeCdp = props.ensureChromeCdp;
   const pendingCount = Object.keys(props.pendingSettings).length;
-
-  useEffect(() => {
-    if (activeTab !== "basic" || !chromeCdpLoginField) {
-      return;
-    }
-    if (!chromeCdpEnabled) {
-      chromeCdpEnsureKeyRef.current = "";
-      return;
-    }
-    const port = normalizePortValue(chromeCdpPort);
-    const ensureKey = `${port}`;
-    if (chromeCdpEnsureKeyRef.current === ensureKey) {
-      return;
-    }
-    chromeCdpEnsureKeyRef.current = ensureKey;
-    void ensureChromeCdp(port).catch(() => {
-      chromeCdpEnsureKeyRef.current = "";
-    });
-  }, [activeTab, chromeCdpEnabled, chromeCdpLoginField, chromeCdpPort, ensureChromeCdp]);
 
   return (
     <section className="settings-panel">
@@ -908,19 +880,15 @@ function SettingsView(props: {
       </div>
       {activeTab === "basic" ? (
         <div className="settings-list" role="tabpanel">
-          <div className="setting-row">
-            <span>输出目录</span>
-            <strong>{props.outputDirectory || settings?.outputDirectory || "未配置"}</strong>
-            <button type="button" onClick={props.chooseOutputDirectory}>
-              选择
-            </button>
-          </div>
           {primaryBasicFields.map((field) => (
             <SchemaSettingField
               key={field.name}
               field={field}
               pendingSettings={props.pendingSettings}
               updateSetting={props.updateSetting}
+              chooseDirectoryForSetting={
+                pathPickerSettingNames.has(field.name) ? props.chooseDirectoryForSetting : undefined
+              }
             />
           ))}
           {compactBasicFields.length > 0 ? (
@@ -1036,13 +1004,13 @@ function handleWorkerEvent(
     return;
   }
   if (event.event === "log") {
-    dispatch({ type: "job/message", payload: { jobId, message: event.message ?? "worker 日志" } });
+    dispatch({ type: "job/message", payload: { jobId, message: event.message ?? "后台工作进程日志" } });
     dispatch({
       type: "job/log",
       payload: {
         jobId,
         level: event.level ?? "info",
-        message: event.message ?? "worker 日志"
+        message: event.message ?? "后台工作进程日志"
       }
     });
     return;
@@ -1075,7 +1043,7 @@ function handleWorkerEvent(
       payload: {
         jobId,
         status: "failed",
-        error: event.error?.message ?? "worker error"
+        error: event.error?.message ?? "后台工作进程错误"
       }
     });
     dispatch({
@@ -1127,13 +1095,13 @@ const outputPlatformLabels = new Map<string, string>([
   ["github", "GitHub"],
   ["linuxdo", "LinuxDo"],
   ["idcflare", "IDCFlare"],
-  ["feishu", "Feishu"],
+  ["feishu", "飞书"],
   ["kdocs", "KDocs"],
   ["flowus", "FlowUs"],
-  ["zhihu", "Zhihu"],
+  ["zhihu", "知乎"],
   ["telegram", "Telegram"],
   ["rss", "RSS"],
-  ["web", "Web"]
+  ["web", "网页"]
 ]);
 
 function outputArtifactFromPath(markdownPath: string): OutputArtifact {
@@ -1141,8 +1109,8 @@ function outputArtifactFromPath(markdownPath: string): OutputArtifact {
   const platformPart = parts.find((part) => outputPlatformLabels.has(part.toLowerCase()));
   return {
     id: `artifact-${markdownPath}`,
-    title: parts.at(-1) ?? "artifact",
-    platform: platformPart ? outputPlatformLabels.get(platformPart.toLowerCase()) ?? platformPart : parts.at(-2) ?? "Output",
+    title: parts.at(-1) ?? "文档",
+    platform: platformPart ? outputPlatformLabels.get(platformPart.toLowerCase()) ?? platformPart : parts.at(-2) ?? "输出",
     markdownPath,
     attachments: [],
     createdAt: new Date().toISOString()
@@ -1151,7 +1119,12 @@ function outputArtifactFromPath(markdownPath: string): OutputArtifact {
 
 function loadSavedOutputDirectory(): string {
   try {
-    return window.localStorage.getItem("feedgrab.outputDirectory") ?? "";
+    const saved = window.localStorage.getItem("feedgrab.outputDirectory") ?? "";
+    if (isLegacyDesktopDefaultPath(saved)) {
+      window.localStorage.removeItem("feedgrab.outputDirectory");
+      return "";
+    }
+    return saved;
   } catch {
     return "";
   }
@@ -1163,6 +1136,10 @@ function saveOutputDirectory(outputDirectory: string): void {
   } catch {
     // Ignore storage-denied environments; the path is still applied for this session.
   }
+}
+
+function isLegacyDesktopDefaultPath(value: string): boolean {
+  return legacyDesktopDefaultPaths.has(value.trim().replace(/\//g, "\\").replace(/\\+$/g, "").toLowerCase());
 }
 
 function DoctorView(props: {
@@ -1634,16 +1611,6 @@ function platformSettingSectionLabel(platformId: string, fieldName: string): str
   return "通用设置";
 }
 
-function getSettingFieldValue(
-  field: SettingsFieldSchema | undefined,
-  pendingSettings: Record<string, SettingsFieldValue>
-): SettingsFieldValue | undefined {
-  if (!field) {
-    return undefined;
-  }
-  return pendingSettings[field.name] ?? field.value ?? field.defaultValue ?? defaultFieldValue(field);
-}
-
 function normalizePortValue(value: SettingsFieldValue | undefined): number {
   const port = typeof value === "number" ? value : Number(value ?? 9222);
   if (Number.isFinite(port) && port >= 1 && port <= 65535) {
@@ -1656,25 +1623,36 @@ function SchemaSettingField(props: {
   field: SettingsFieldSchema;
   pendingSettings: Record<string, SettingsFieldValue>;
   updateSetting: (name: string, value: SettingsFieldValue) => void;
+  chooseDirectoryForSetting?: (name: string) => void;
   compact?: boolean;
 }): ReactElement {
   const field = props.field;
   const inputId = `setting-${field.name}`;
   const value = props.pendingSettings[field.name] ?? field.value ?? field.defaultValue ?? defaultFieldValue(field);
+  const labelText = settingFieldLabel(field);
+  const labelHint = settingFieldLabelHint(field);
+  const labelHintId = labelHint ? `${inputId}-hint` : undefined;
+  const controlDescription = labelHint ? "" : field.description;
   const className = props.compact
     ? `setting-row schema-setting-row compact-setting-row schema-field-${field.type}`
     : `setting-row schema-setting-row schema-field-${field.type}`;
 
   return (
     <div className={className}>
-      <label className="setting-label" htmlFor={inputId}>
-        {field.label || field.name}
-      </label>
+      <div className={labelHint ? "setting-label has-hint" : "setting-label"}>
+        <label htmlFor={inputId}>{labelText}</label>
+        {labelHintId ? (
+          <small id={labelHintId} className="setting-label-hint">
+            {labelHint}
+          </small>
+        ) : null}
+      </div>
       <div className="setting-control">
         {field.type === "boolean" ? (
           <input
             id={inputId}
             type="checkbox"
+            aria-describedby={labelHintId}
             checked={settingBooleanValue(value)}
             onChange={(event) => props.updateSetting(field.name, event.currentTarget.checked)}
           />
@@ -1682,6 +1660,7 @@ function SchemaSettingField(props: {
         {field.type === "select" ? (
           <select
             id={inputId}
+            aria-describedby={labelHintId}
             value={String(value)}
             onChange={(event) =>
               props.updateSetting(field.name, settingOptionValue(field, event.currentTarget.value))
@@ -1698,6 +1677,7 @@ function SchemaSettingField(props: {
           <input
             id={inputId}
             type="number"
+            aria-describedby={labelHintId}
             value={String(value)}
             onChange={(event) => props.updateSetting(field.name, Number(event.currentTarget.value))}
           />
@@ -1706,24 +1686,56 @@ function SchemaSettingField(props: {
           <input
             id={inputId}
             type="password"
+            aria-describedby={labelHintId}
             value={String(value)}
             autoComplete="off"
             onChange={(event) => props.updateSetting(field.name, event.currentTarget.value)}
           />
         ) : null}
-        {field.type === "path" || field.type === "string" ? (
+        {field.type === "path" && props.chooseDirectoryForSetting ? (
+          <div className="setting-path-picker">
+            <input
+              id={inputId}
+              type="text"
+              aria-describedby={labelHintId}
+              value={String(value)}
+              placeholder={field.placeholder}
+              onChange={(event) => props.updateSetting(field.name, event.currentTarget.value)}
+            />
+            <button type="button" onClick={() => props.chooseDirectoryForSetting?.(field.name)}>
+              选择
+            </button>
+          </div>
+        ) : null}
+        {field.type === "string" || (field.type === "path" && !props.chooseDirectoryForSetting) ? (
           <input
             id={inputId}
             type="text"
+            aria-describedby={labelHintId}
             value={String(value)}
             placeholder={field.placeholder}
             onChange={(event) => props.updateSetting(field.name, event.currentTarget.value)}
           />
         ) : null}
-        {field.description ? <small>{field.description}</small> : null}
+        {controlDescription ? <small>{controlDescription}</small> : null}
       </div>
     </div>
   );
+}
+
+function settingFieldLabel(field: SettingsFieldSchema): string {
+  const label = field.label || field.name;
+  if (field.name === "OBSIDIAN_VAULT") {
+    return label.replace(/（高优先级）|\(高优先级\)/g, "").trim() || "Obsidian Vault";
+  }
+  return label;
+}
+
+function settingFieldLabelHint(field: SettingsFieldSchema): string {
+  if (field.name === "OBSIDIAN_VAULT") {
+    return field.description || "高优先级";
+  }
+  return "";
 }
 
 function defaultFieldValue(field: SettingsFieldSchema): SettingsFieldValue {
@@ -1764,14 +1776,26 @@ function browserPreviewUserAgent(): string {
   return typeof navigator !== "undefined" ? navigator.userAgent : "";
 }
 
-function settingsSchemaFromSnapshot(settings: SettingsSnapshot | undefined, outputDirectory: string): SettingsSchema {
+function settingsSchemaFromSnapshot(settings: SettingsSnapshot | undefined): SettingsSchema {
+  const resolvedOutputDirectory =
+    settings?.effectiveOutputDirectory || settings?.outputDirectory || loadSavedOutputDirectory() || "";
+  const rawOutputDirectory = settings?.outputDirectory || "";
+  const rawObsidianVault = settings?.obsidianVault || "";
+  const resolvedDataDirectory = deriveSiblingDirectory(resolvedOutputDirectory, "output", "sessions");
   return {
     basic: [
-      { name: "OUTPUT_DIR", label: "输出目录", type: "path", value: outputDirectory || settings?.outputDirectory || "" },
+      { name: "OUTPUT_DIR", label: "输出目录", type: "path", value: rawOutputDirectory },
+      {
+        name: "OBSIDIAN_VAULT",
+        label: "Obsidian Vault",
+        type: "path",
+        value: rawObsidianVault,
+        description: "高优先级"
+      },
       { name: "CONCURRENCY", label: "并发上限", type: "number", value: settings?.concurrency ?? 1 },
       { name: "DOWNLOAD_IMAGES", label: "下载图片", type: "boolean", value: settings?.downloadImages ?? false },
       { name: "LOCALIZE_MEDIA", label: "媒体本地化", type: "boolean", value: settings?.localizeMedia ?? false },
-      { name: "FEEDGRAB_DATA_DIR", label: "登录态和数据目录", type: "path", value: "sessions" },
+      { name: "FEEDGRAB_DATA_DIR", label: "登录态和数据目录", type: "path", value: resolvedDataDirectory },
       { name: "BROWSER_USER_AGENT", label: "浏览器 User-Agent", type: "string", value: browserPreviewUserAgent() },
       { name: "CHROME_CDP_LOGIN", label: "优先从 Chrome CDP 提取登录态", type: "boolean", value: false },
       { name: "CHROME_CDP_PORT", label: "Chrome CDP 端口", type: "number", value: 9222 },
@@ -2024,6 +2048,20 @@ function settingsSchemaFromSnapshot(settings: SettingsSnapshot | undefined, outp
   };
 }
 
+function deriveSiblingDirectory(sourceDirectory: string, sourceName: string, siblingName: string): string {
+  const trimmed = sourceDirectory.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const normalized = trimmed.replace(/\//g, "\\").replace(/\\+$/g, "");
+  const segments = normalized.split("\\");
+  if ((segments.at(-1) ?? "").toLowerCase() !== sourceName.toLowerCase()) {
+    return "";
+  }
+  segments[segments.length - 1] = siblingName;
+  return segments.join("\\");
+}
+
 function loginStatusDetail(status: LoginStatus): string {
   if (typeof status.accountCount === "number") {
     const validCount = status.validCount ?? 0;
@@ -2039,7 +2077,7 @@ function loginStatusDetail(status: LoginStatus): string {
   if (status.status === "notRequired") {
     return "该平台可直接抓取，登录态可选。";
   }
-  return status.sessionPath ? `session: ${status.sessionPath}` : "等待检测";
+  return status.sessionPath ? `登录态文件：${status.sessionPath}` : "等待检测";
 }
 
 function mergeLoginStatuses(current: LoginStatus[], updates: LoginStatus[]): LoginStatus[] {
@@ -2559,7 +2597,7 @@ function resolveFeedgrabApi(): FeedgrabIpcApi {
 }
 
 function createUnavailableApi(): FeedgrabIpcApi {
-  const unavailable = () => Promise.reject(new Error("Electron preload 未加载，真实 worker 不可用"));
+  const unavailable = () => Promise.reject(new Error("Electron 预加载脚本未加载，真实后台工作进程不可用"));
   return {
     ping: unavailable as FeedgrabIpcApi["ping"],
     detectPlatform: unavailable as FeedgrabIpcApi["detectPlatform"],
@@ -2643,7 +2681,7 @@ function createFallbackApi(): FeedgrabIpcApi {
         for (const job of jobs) {
           const markdownPath = job.markdownPath ?? `${request.outputDirectory}\\${job.platform}\\mock.md`;
           emit({ id: job.id, event: "job_started", method: "fetch", result: { total: 1 } });
-          emit({ id: job.id, event: "progress", method: "fetch", url: job.url, stage: "fetch", message: "fetching" });
+          emit({ id: job.id, event: "progress", method: "fetch", url: job.url, stage: "fetch", message: "正在抓取" });
           emit({ id: job.id, event: "artifact", method: "fetch", url: job.url, artifact: { kind: "markdown", path: markdownPath } });
           emit({ id: job.id, event: "done", method: "fetch", result: { fetched: 1, errors: 0 } });
         }
@@ -2666,7 +2704,7 @@ function createFallbackApi(): FeedgrabIpcApi {
         browser: "mock",
         network: "disabled",
         writableOutput: true,
-        notes: ["浏览器内测试环境使用 mock worker，不访问真实平台。"]
+        notes: ["浏览器内测试环境使用模拟后台工作进程，不访问真实平台。"]
       });
     },
     repairDoctor(checkName) {
@@ -2674,7 +2712,9 @@ function createFallbackApi(): FeedgrabIpcApi {
     },
     settingsSnapshot() {
       return Promise.resolve({
-        outputDirectory: "D:\\Notes\\Feeds",
+        outputDirectory: "",
+        obsidianVault: "",
+        effectiveOutputDirectory: "",
         concurrency: 1,
         downloadImages: true,
         localizeMedia: true,
@@ -2682,7 +2722,7 @@ function createFallbackApi(): FeedgrabIpcApi {
       });
     },
     settingsSchema() {
-      return Promise.resolve(settingsSchemaFromSnapshot(undefined, "D:\\Notes\\Feeds"));
+      return Promise.resolve(settingsSchemaFromSnapshot(undefined));
     },
     settingsUpdate(values) {
       return Promise.resolve({
@@ -2724,10 +2764,10 @@ function createFallbackApi(): FeedgrabIpcApi {
       return Promise.resolve({
         ok: true,
         sourceDirectory: sourceRoot,
-        targetDirectory: "D:\\Notes\\Feeds\\sessions",
+        targetDirectory: "D:\\feedgrab Desktop\\sessions",
         imported: platforms.map((item) => ({
           source: `${sourceRoot}\\${item}.json`,
-          target: `D:\\Notes\\Feeds\\sessions\\${item}.json`
+          target: `D:\\feedgrab Desktop\\sessions\\${item}.json`
         })),
         skipped: [],
         disabled: [],
@@ -2749,7 +2789,7 @@ function createFallbackApi(): FeedgrabIpcApi {
       return Promise.resolve({ ok: true });
     },
     chooseOutputDirectory() {
-      return Promise.resolve({ ok: true, path: "D:\\Notes\\Feeds" });
+      return Promise.resolve({ ok: true, path: "D:\\feedgrab Desktop\\output" });
     },
     fetchRemoteMarkdown(url) {
       return fetch(url, { cache: "no-cache" }).then(async (response) => ({

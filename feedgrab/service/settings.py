@@ -65,11 +65,16 @@ class SettingsUpdateResult:
 class SettingsService:
     """Read core feedgrab runtime settings without exposing secret values."""
 
+    _LEGACY_DESKTOP_DEFAULT_PATHS = {
+        "e:\\obsidian\\qiang_obsidian\\inbox",
+    }
+
     def __init__(self, settings_path: str | Path | None = None):
         self.settings_path = Path(settings_path) if settings_path is not None else self._default_settings_path()
         self._schema = get_platform_settings_schema()
         self._field_map = self._schema.field_map()
         self._saved_settings = self._load_saved_settings()
+        self._migrate_legacy_desktop_defaults()
         self._project_saved_settings()
         self._project_proxy_settings()
 
@@ -122,27 +127,27 @@ class SettingsService:
 
     def snapshot(self) -> SettingsSnapshot:
         items = [
-            self._path_item("OUTPUT_DIR", "Markdown output directory"),
-            self._path_item("OBSIDIAN_VAULT", "Obsidian Vault（高优先级）"),
-            self._path_item("FEEDGRAB_DATA_DIR", "feedgrab data/session directory"),
+            self._path_item("OUTPUT_DIR", "Markdown 输出目录"),
+            self._path_item("OBSIDIAN_VAULT", "Obsidian Vault"),
+            self._path_item("FEEDGRAB_DATA_DIR", "feedgrab 数据/登录态目录"),
             ConfigItem(
                 name="session_dir",
                 value=str(self.session_dir()),
                 value_type="path",
-                description="Resolved Playwright storage_state directory",
+                description="已解析的 Playwright 登录态目录",
             ),
             ConfigItem(
                 name="cookie_dir",
                 value=str(self.cookie_dir()),
                 value_type="path",
-                description="Resolved cookie directory",
+                description="已解析的 Cookie 目录",
             ),
             ConfigItem(
                 name="user_agent",
                 value=self.user_agent(),
                 value_type="string",
                 source="BROWSER_USER_AGENT" if os.getenv("BROWSER_USER_AGENT") else "default",
-                description="User-Agent used by browser/HTTP fetchers",
+                description="浏览器/HTTP 抓取使用的 User-Agent",
             ),
         ]
         for name in ("GROQ_API_KEY", "TWITTERAPI_IO_KEY", "FEISHU_APP_SECRET"):
@@ -223,6 +228,62 @@ class SettingsService:
             if field is not None:
                 os.environ[name] = self._coerce_for_env(value, field)
 
+    def _migrate_legacy_desktop_defaults(self) -> None:
+        if not self._is_desktop_worker_runtime():
+            return
+        changed = False
+
+        output_dir_value = self._saved_settings.get("OUTPUT_DIR")
+        if self._is_legacy_desktop_default_path(output_dir_value) or self._is_desktop_default_output_dir_value(output_dir_value):
+            install_output_dir = os.getenv("OUTPUT_DIR", "").strip()
+            if install_output_dir:
+                self._saved_settings["OUTPUT_DIR"] = install_output_dir
+            else:
+                self._saved_settings.pop("OUTPUT_DIR", None)
+            changed = True
+
+        if self._is_legacy_desktop_default_path(self._saved_settings.get("OBSIDIAN_VAULT")):
+            self._saved_settings["OBSIDIAN_VAULT"] = ""
+            changed = True
+
+        if self._is_desktop_default_data_dir_value(self._saved_settings.get("FEEDGRAB_DATA_DIR")):
+            install_sessions_dir = os.getenv("FEEDGRAB_INSTALL_SESSIONS_DIR", "").strip()
+            if install_sessions_dir:
+                self._saved_settings["FEEDGRAB_DATA_DIR"] = install_sessions_dir
+                changed = True
+
+        if changed:
+            self._save_settings()
+
+    @classmethod
+    def _is_legacy_desktop_default_path(cls, value: Any) -> bool:
+        if not isinstance(value, str):
+            return False
+        return cls._normalize_path_for_match(value) in cls._LEGACY_DESKTOP_DEFAULT_PATHS
+
+    @staticmethod
+    def _normalize_path_for_match(value: str) -> str:
+        return value.strip().strip('"').replace("/", "\\").rstrip("\\").lower()
+
+    @staticmethod
+    def _is_desktop_default_data_dir_value(value: Any) -> bool:
+        if not isinstance(value, str):
+            return False
+        normalized = value.strip().replace("/", "\\").rstrip("\\").lower()
+        return normalized in {"", "sessions", ".", ".\\sessions", "\\sessions"}
+
+    @staticmethod
+    def _is_desktop_default_output_dir_value(value: Any) -> bool:
+        if not isinstance(value, str):
+            return False
+        normalized = value.strip().replace("/", "\\").rstrip("\\").lower()
+        return normalized in {"", "output", ".", ".\\output", "\\output", "./output"}
+
+    @staticmethod
+    def _is_desktop_worker_runtime() -> bool:
+        worker_mode = os.getenv("FEEDGRAB_WORKER_MODE", "").strip().lower()
+        return worker_mode in {"1", "true", "yes", "on"} or bool(os.getenv("FEEDGRAB_DESKTOP_RUNTIME_ROOT", "").strip())
+
     def _project_proxy_settings(self) -> None:
         proxy_setting_names = {"FEEDGRAB_PROXY_ENABLED", "FEEDGRAB_PROXY_URL", "FEEDGRAB_NO_PROXY"}
         if not any(name in self._saved_settings or os.getenv(name) is not None for name in proxy_setting_names):
@@ -258,6 +319,10 @@ class SettingsService:
             return bool(value)
         if field.value_type == "integer":
             return int(value)
+        if field.name == "OUTPUT_DIR":
+            return SettingsService._normalize_desktop_output_dir("" if value is None else str(value))
+        if field.name == "FEEDGRAB_DATA_DIR":
+            return SettingsService._normalize_desktop_data_dir("" if value is None else str(value))
         return "" if value is None else value
 
     @staticmethod
@@ -266,4 +331,28 @@ class SettingsService:
             return ""
         if field.value_type == "boolean":
             return "true" if bool(value) else "false"
+        if field.name == "OUTPUT_DIR":
+            return SettingsService._normalize_desktop_output_dir(str(value))
+        if field.name == "FEEDGRAB_DATA_DIR":
+            return SettingsService._normalize_desktop_data_dir(str(value))
         return str(value)
+
+    @staticmethod
+    def _normalize_desktop_output_dir(value: str) -> str:
+        text = str(value)
+        normalized = text.strip().replace("/", "\\").rstrip("\\").lower()
+        if SettingsService._is_desktop_worker_runtime() and normalized in {"", "output", ".", ".\\output", "\\output", "./output"}:
+            install_output_dir = os.getenv("OUTPUT_DIR", "").strip()
+            if install_output_dir:
+                return install_output_dir
+        return text
+
+    @staticmethod
+    def _normalize_desktop_data_dir(value: str) -> str:
+        text = str(value)
+        normalized = text.strip().replace("/", "\\").rstrip("\\").lower()
+        if normalized in {"", "sessions", ".", ".\\sessions", "\\sessions"}:
+            install_sessions_dir = os.getenv("FEEDGRAB_INSTALL_SESSIONS_DIR", "").strip()
+            if install_sessions_dir:
+                return install_sessions_dir
+        return text

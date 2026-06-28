@@ -536,6 +536,10 @@ code {
   font-weight: 700;
 }
 
+textarea + .inline-notice {
+  margin-top: 10px;
+}
+
 .log-panel {
   min-height: 0;
   padding: 16px;
@@ -869,6 +873,7 @@ code {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+  padding: 8px 0 10px;
 }
 
 .settings-tabs {
@@ -905,7 +910,13 @@ code {
   border-top: 0;
 }
 
+.settings-list > .setting-row {
+  grid-template-columns: 180px minmax(0, 1fr) 82px;
+  border-top: 0;
+}
+
 .setting-row strong {
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
@@ -916,20 +927,41 @@ code {
   color: #2c271f;
 }
 
+.settings-list > .setting-row button {
+  justify-self: end;
+  min-width: 72px;
+}
+
 .schema-setting-row {
   cursor: default;
 }
 
+.settings-list > .schema-setting-row:not(.compact-setting-row) .setting-control {
+  grid-column: 2 / 4;
+}
+
 .setting-label {
+  display: grid;
+  gap: 3px;
   color: #211f1b;
   font-weight: 800;
   line-height: 1.25;
   cursor: pointer;
 }
 
+.setting-label label {
+  cursor: pointer;
+}
+
+.setting-label-hint {
+  color: #756f63;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
 .settings-compact-section {
   padding: 12px 16px;
-  border-top: 1px solid #e5ddcf;
 }
 
 .settings-compact-grid {
@@ -993,6 +1025,19 @@ code {
 .setting-control {
   display: grid;
   gap: 5px;
+}
+
+.setting-path-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px;
+  gap: 12px;
+  align-items: center;
+}
+
+.setting-path-picker button {
+  justify-self: end;
+  width: 72px;
+  min-height: 34px;
 }
 
 .setting-control input:not([type="checkbox"]),
@@ -1374,6 +1419,18 @@ code {
   .split-layout,
   .job-row,
   .setting-row {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-list > .setting-row {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-list > .schema-setting-row:not(.compact-setting-row) .setting-control {
+    grid-column: auto;
+  }
+
+  .setting-path-picker {
     grid-template-columns: 1fr;
   }
 

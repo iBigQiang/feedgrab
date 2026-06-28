@@ -554,7 +554,7 @@ async def _fetch_wiki_via_playwright(
 
         session_path = get_session_path("feishu")
         if not Path(session_path).exists():
-            raise RuntimeError("Feishu session not found. Run: feedgrab login feishu")
+            raise RuntimeError("未找到飞书登录态。请运行：feedgrab login feishu")
 
         pw = await _pw_factory().start()
         browser = await pw.chromium.launch(
@@ -826,13 +826,13 @@ async def fetch_feishu_wiki(url: str) -> Dict[str, Any]:
     """
     if not feishu_wiki_batch_enabled():
         raise ValueError(
-            "Wiki batch is disabled. Set FEISHU_WIKI_BATCH_ENABLED=true "
-            "or use the feishu-wiki CLI command."
+            "飞书知识库批量抓取未启用。请设置 FEISHU_WIKI_BATCH_ENABLED=true，"
+            "或使用 feishu-wiki CLI 命令。"
         )
 
     parsed = parse_feishu_url(url)
     if not parsed or parsed["type"] != "wiki":
-        raise ValueError(f"Not a Feishu wiki URL: {url}")
+        raise ValueError(f"不是飞书知识库 URL：{url}")
 
     root_token = parsed["token"]
 
@@ -850,7 +850,7 @@ async def fetch_feishu_wiki(url: str) -> Dict[str, Any]:
         return await _fetch_wiki_via_playwright(url, root_token)
     except Exception as e:
         raise RuntimeError(
-            f"Wiki batch failed: {e}. "
-            "Options: 1) Set FEISHU_APP_ID + FEISHU_APP_SECRET, "
-            "2) Run 'feedgrab login feishu'"
+            f"飞书知识库批量抓取失败：{e}。"
+            "可选处理：1) 配置 FEISHU_APP_ID + FEISHU_APP_SECRET；"
+            "2) 运行 'feedgrab login feishu'"
         )

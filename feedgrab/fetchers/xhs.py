@@ -135,9 +135,9 @@ async def fetch_xhs(url: str) -> Dict[str, Any]:
     if not Path(session_path).exists():
         # Tier 3: No session — guide user
         raise RuntimeError(
-            f"❌ XHS blocked Jina and no saved session found.\n"
-            f"   Run: feedgrab login xhs\n"
-            f"   Then retry this URL."
+            "❌ 小红书需要登录态，当前未找到已保存的登录态。\n"
+            "   请先运行：feedgrab login xhs\n"
+            "   登录后再重新抓取这个 URL。"
         )
 
     try:
@@ -151,9 +151,9 @@ async def fetch_xhs(url: str) -> Dict[str, Any]:
         if final_url and final_url != url:
             if final_url.rstrip("/").endswith("/explore") or "login" in final_url:
                 raise RuntimeError(
-                    f"❌ XHS session expired (redirected to {final_url}).\n"
-                    f"   Run: feedgrab login xhs\n"
-                    f"   Then retry this URL."
+                    f"❌ 小红书登录态已过期或失效（页面跳转到 {final_url}）。\n"
+                    "   请运行：feedgrab login xhs\n"
+                    "   登录后再重新抓取这个 URL。"
                 )
 
         return {
@@ -176,7 +176,7 @@ async def fetch_xhs(url: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"[XHS] Browser fetch also failed: {e}")
         raise RuntimeError(
-            f"❌ All XHS fetch methods failed.\n"
-            f"   Last error: {e}\n"
-            f"   Try: feedgrab login xhs (to refresh session)"
+            "❌ 小红书抓取所有兜底方式都失败。\n"
+            f"   最后错误：{e}\n"
+            "   可尝试运行：feedgrab login xhs（刷新登录态）"
         )

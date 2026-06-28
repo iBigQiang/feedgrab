@@ -49,7 +49,17 @@ python -m pytest tests/test_service_desktop.py tests/test_worker_protocol.py tes
 
 ## 3. 重新打包 exe 安装包
 
-在 `desktop/` 下重新打包当前分支的 Windows 用户级安装包：
+在 `desktop/` 下先确认桌面端版本号。每次发布新的安装包前，必须递增
+`desktop/package.json` 里的版本号，至少递增 patch 版本，例如 `0.1.0` → `0.1.1`
+→ `0.1.2`。不要连续发布多个不同安装包却复用同一个版本号和文件名。
+
+```powershell
+cd D:\AiCode\feedgrab\desktop
+$desktopVersion = (Get-Content package.json | ConvertFrom-Json).version
+$desktopVersion
+```
+
+确认版本号已递增后，重新打包当前分支的 Windows 用户级安装包：
 
 ```powershell
 cd D:\AiCode\feedgrab\desktop
@@ -89,22 +99,10 @@ Get-AuthenticodeSignature $installer.FullName | Select-Object Status,SignerCerti
 desktop-v<desktop-package-version>-YYYYMMDD
 ```
 
-示例：
-
-```text
-desktop-v0.1.0-20260627
-```
-
 Release asset 文件名使用无空格、稳定、可复制的名称：
 
 ```text
 feedgrab-desktop-setup-<desktop-package-version>.exe
-```
-
-示例：
-
-```text
-feedgrab-desktop-setup-0.1.0.exe
 ```
 
 先提交并推送当前分支上的代码和文档基础更新，确保 GitHub Release tag 可以指向远端已有提交；仍然只推送当前分支：
@@ -120,19 +118,23 @@ git push origin feedgrab-desktop
 创建或更新 GitHub Release：
 
 ```powershell
-gh release create desktop-v0.1.0-YYYYMMDD `
+$releaseDate = Get-Date -Format yyyyMMdd
+$tag = "desktop-v$desktopVersion-$releaseDate"
+$assetName = "feedgrab-desktop-setup-$desktopVersion.exe"
+
+gh release create $tag `
   --repo iBigQiang/feedgrab `
   --target feedgrab-desktop `
-  --title "feedgrab Desktop v0.1.0 YYYY-MM-DD" `
+  --title "feedgrab Desktop v$desktopVersion $releaseDate" `
   --notes "feedgrab Desktop preview installer for feedgrab-desktop branch." `
-  "$installer#feedgrab-desktop-setup-0.1.0.exe"
+  "$installer#$assetName"
 ```
 
 如果 tag 或 release 已存在，则使用覆盖上传：
 
 ```powershell
-gh release upload desktop-v0.1.0-YYYYMMDD `
-  "$installer#feedgrab-desktop-setup-0.1.0.exe" `
+gh release upload $tag `
+  "$installer#$assetName" `
   --repo iBigQiang/feedgrab `
   --clobber
 ```
@@ -142,8 +144,8 @@ gh release upload desktop-v0.1.0-YYYYMMDD `
 通过 GitHub API 获取真实 asset URL，不要只手写猜测地址：
 
 ```powershell
-$url = gh api repos/iBigQiang/feedgrab/releases/tags/desktop-v0.1.0-YYYYMMDD `
-  --jq '.assets[] | select(.name=="feedgrab-desktop-setup-0.1.0.exe") | .browser_download_url'
+$url = gh api "repos/iBigQiang/feedgrab/releases/tags/$tag" `
+  --jq ".assets[] | select(.name==`"$assetName`") | .browser_download_url"
 $url
 curl.exe -I -L $url
 ```
@@ -160,8 +162,21 @@ curl.exe -I -L $url
 
 - `D:\AiCode\feedgrab\desktop\README.md`
 - `D:\AiCode\feedgrab\docs\feedgrab-desktop-packaging.md`
-- 如总 README 有桌面端下载入口，同步更新 `README.md` / `README_en.md`
+- 根目录 `README.md` 必须由 `desktop\README.md` 全文覆盖；`README_en.md` 如保留桌面端下载入口，也要同步更新 URL/tag
 - 如本次属于版本记录，更新 `DEVLOG.md`
+
+在 `feedgrab-desktop` 分支上，仓库根目录 `README.md` 必须使用 `desktop\README.md`
+的客户端说明全文覆盖。这样 GitHub 打开 `feedgrab-desktop` 分支时默认展示桌面客户端说明；
+不要把这个规则应用到 `main`，也不要因此推送 `main`。
+
+发布信息更新顺序必须是：先更新 `desktop\README.md`，再复制覆盖根目录 `README.md`，
+最后运行以下命令确认两者一致：
+
+```powershell
+Compare-Object (Get-Content README.md) (Get-Content desktop\README.md)
+```
+
+命令无输出才算通过。
 
 `desktop/README.md` 至少包含：
 
@@ -206,6 +221,7 @@ git push origin feedgrab-desktop
 - GitHub Release asset 已上传
 - 已获取并核验真实安装包下载地址
 - `desktop/README.md` 已写入真实下载地址
+- `README.md` 已同步为 `desktop/README.md` 的客户端说明
 - 最后一轮更新已再次推送到当前分支
 - `main` 未被推送或修改
 

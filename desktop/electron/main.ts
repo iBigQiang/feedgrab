@@ -1,12 +1,13 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, session, shell } from "electron";
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { access, mkdir, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import type {
   ChromeCdpEnsureResult,
+  DirectorySelectionOptions,
   FeedgrabWorkerEvent,
   FetchRequest,
   LoginStatusRequest,
@@ -115,6 +116,62 @@ function ensureRuntimeDirectories(runtime: FeedgrabRuntimeResolution): void {
       mkdirSync(targetPath, { recursive: true });
     }
   }
+  synchronizeSessionTemplates(runtime.env.FEEDGRAB_DATA_DIR);
+}
+
+function synchronizeSessionTemplates(dataDirectory: string | undefined): void {
+  if (!dataDirectory) {
+    return;
+  }
+
+  const sourceDirectory = resolveSessionTemplateSourceDirectory();
+  if (!sourceDirectory) {
+    smokeLog("session template source directory not found");
+    return;
+  }
+
+  try {
+    copySessionTemplates(sourceDirectory, dataDirectory);
+  } catch (error) {
+    smokeLog(`session template sync failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function resolveSessionTemplateSourceDirectory(): string | undefined {
+  const templateSourceCandidates = [
+    path.join(process.resourcesPath, "session-templates"),
+    path.join(projectRoot, "desktop", "session-templates")
+  ];
+
+  return templateSourceCandidates.find((candidate) => {
+    if (!existsSync(candidate)) {
+      return false;
+    }
+    try {
+      return statSync(candidate).isDirectory();
+    } catch {
+      return false;
+    }
+  });
+}
+
+function copySessionTemplates(sourceDirectory: string, targetDirectory: string): void {
+  mkdirSync(targetDirectory, { recursive: true });
+  const entries = readdirSync(sourceDirectory, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const sourcePath = path.join(sourceDirectory, entry.name);
+    const targetPath = path.join(targetDirectory, entry.name);
+
+    if (entry.isDirectory()) {
+      copySessionTemplates(sourcePath, targetPath);
+      continue;
+    }
+    if (!entry.isFile() || existsSync(targetPath)) {
+      continue;
+    }
+    copyFileSync(sourcePath, targetPath);
+  }
 }
 
 function smokeLog(message: string): void {
@@ -155,7 +212,7 @@ function createWindow(): void {
     height: 820,
     minWidth: 960,
     minHeight: 680,
-    title: "feedgrab Desktop",
+    title: "feedgrab 桌面版",
     icon: loadAppWindowIcon(),
     backgroundColor: "#f7f4ef",
     webPreferences: {
@@ -307,16 +364,18 @@ function registerIpc(): void {
     }
     return currentWorker().importLoginSessions(sourceDirectory, platform);
   });
-  ipcMain.handle("feedgrab:loginPlatform", (_event, platform: SupportedPlatform) => {
+  ipcMain.handle("feedgrab:loginPlatform", async (_event, platform: SupportedPlatform) => {
     if (!isSupportedPlatform(platform)) {
       throw new Error("无效平台");
     }
+    await ensureChromeCdpForLogin();
     return currentWorker().loginPlatform(platform);
   });
   ipcMain.handle("feedgrab:outputList", () => currentWorker().outputList());
-  ipcMain.handle("feedgrab:chooseOutputDirectory", async () => {
+  ipcMain.handle("feedgrab:chooseOutputDirectory", async (_event, options?: DirectorySelectionOptions) => {
+    const title = typeof options?.title === "string" && options.title.trim() ? options.title.trim() : "选择目录";
     const result = await dialog.showOpenDialog({
-      title: "选择 feedgrab 输出目录",
+      title,
       properties: ["openDirectory", "createDirectory"]
     });
     if (result.canceled || result.filePaths.length === 0) {
@@ -494,6 +553,20 @@ async function ensureChromeCdp(requestedPort?: number): Promise<ChromeCdpEnsureR
   };
 }
 
+async function ensureChromeCdpForLogin(): Promise<void> {
+  const settings = readDesktopSettings();
+  const enabled = normalizeBoolean(settings.CHROME_CDP_LOGIN ?? process.env.CHROME_CDP_LOGIN);
+  if (!enabled) {
+    return;
+  }
+
+  const port = normalizeCdpPort(numberValue(settings.CHROME_CDP_PORT ?? process.env.CHROME_CDP_PORT));
+  const result = await ensureChromeCdp(port);
+  if (!result.ok) {
+    smokeLog(`Chrome CDP login ensure failed: ${result.error ?? result.message}`);
+  }
+}
+
 async function probeChromeCdp(port: number): Promise<{ ok: boolean; url?: string; error?: string }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), chromeCdpProbeTimeoutMs);
@@ -519,6 +592,17 @@ function normalizeCdpPort(port?: number): number {
     return Math.floor(port);
   }
   return 9222;
+}
+
+function numberValue(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
 }
 
 function findChromeExecutable(): string | undefined {

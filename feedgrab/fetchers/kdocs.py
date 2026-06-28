@@ -729,15 +729,15 @@ def download_kdocs_images(
 
         fpath = att_dir / fname
         if fpath.exists() and fpath.stat().st_size > 0:
-            logger.debug(f"[kdocs] Image already exists: {fname}")
+            logger.debug(f"[kdocs] 图片已存在：{fname}")
             continue
 
         try:
             resp = http_get(url, timeout=30)
             if resp.status_code == 200:
                 fpath.write_bytes(resp.content)
-                logger.info(f"[kdocs] Downloaded: {fname} ({len(resp.content)} bytes)")
+                logger.info(f"[kdocs] 已下载：{fname}（{len(resp.content)} bytes）")
             else:
-                logger.warning(f"[kdocs] Image download failed ({resp.status_code}): {fname}")
+                logger.warning(f"[kdocs] 图片下载失败（{resp.status_code}）：{fname}")
         except Exception as e:
-            logger.warning(f"[kdocs] Image download error: {fname} — {e}")
+            logger.warning(f"[kdocs] 图片下载异常：{fname} — {e}")

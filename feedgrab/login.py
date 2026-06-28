@@ -8,11 +8,13 @@ Usage:
 
 Sessions are saved as Playwright storage_state JSON files.
 
-When CHROME_CDP_LOGIN=true, cookies are extracted directly from a running
-Chrome instance via CDP (Chrome DevTools Protocol), skipping the browser
-login flow entirely.
+When CHROME_CDP_LOGIN=true, feedgrab first extracts existing cookies from a
+running Chrome instance via CDP (Chrome DevTools Protocol). If no matching
+cookies are available, it opens the platform login page in that CDP Chrome,
+then falls back to the normal Playwright login window if CDP fails.
 """
 
+import contextlib
 import json
 import os
 import time
@@ -20,8 +22,6 @@ from pathlib import Path
 from loguru import logger
 
 from feedgrab.config import get_session_dir, get_user_agent
-
-SESSION_DIR = get_session_dir()
 
 PLATFORM_URLS = {
     "xhs": "https://www.xiaohongshu.com/explore",
@@ -45,7 +45,11 @@ def _save_session(context, session_path: Path) -> None:
     context.storage_state(path=str(session_path))
     os.chmod(str(session_path), 0o600)
     logger.info(f"Session saved: {session_path}")
-    print(f"\n✅ Session saved to {session_path}")
+    print(f"\n✅ 登录态已保存到 {session_path}")
+
+
+def _session_dir() -> Path:
+    return get_session_dir()
 
 
 def _resolve_canonical(platform: str) -> str:
@@ -65,8 +69,8 @@ def login(platform: str, headless: bool = False) -> None:
     Open a browser for the user to log in manually.
     After login, saves cookies/localStorage to a session file.
 
-    When CHROME_CDP_LOGIN=true, extracts cookies from a running Chrome
-    instance via CDP instead of opening a new browser.
+    When CHROME_CDP_LOGIN=true, prefers a running CDP Chrome for cookie
+    extraction/login, then falls back to a new Playwright browser if needed.
 
     Args:
         platform: Platform key (e.g. 'xhs', 'wechat')
@@ -75,13 +79,14 @@ def login(platform: str, headless: bool = False) -> None:
     platform = platform.lower()
     if platform not in PLATFORM_URLS:
         supported = ", ".join(sorted(PLATFORM_URLS.keys()))
-        print(f"Unknown platform: {platform}")
-        print(f"   Supported: {supported}")
+        print(f"不支持的平台：{platform}")
+        print(f"   支持的平台：{supported}")
         return
 
-    SESSION_DIR.mkdir(parents=True, exist_ok=True)
+    session_dir = _session_dir()
+    session_dir.mkdir(parents=True, exist_ok=True)
     canonical = _resolve_canonical(platform)
-    session_path = SESSION_DIR / f"{canonical}.json"
+    session_path = session_dir / f"{canonical}.json"
 
     # --- CDP mode: extract from running Chrome ---
     from feedgrab.config import chrome_cdp_login
@@ -89,14 +94,17 @@ def login(platform: str, headless: bool = False) -> None:
         ok = _login_via_cdp(canonical, session_path)
         if ok:
             return
-        print("CDP extraction failed, falling back to browser login...")
+        ok = _login_interactive_via_cdp(canonical, PLATFORM_URLS[platform], session_path)
+        if ok:
+            return
+        print("CDP 提取未成功，改用普通浏览器登录...")
 
     # --- Normal browser login ---
     try:
         from playwright.sync_api import sync_playwright  # noqa: F401
     except ImportError:
         print(
-            "Playwright is not installed. Run:\n"
+            "未安装 Playwright。请运行：\n"
             '   pip install "feedgrab[browser]"\n'
             "   playwright install chromium"
         )
@@ -111,8 +119,8 @@ def login(platform: str, headless: bool = False) -> None:
 def _login_visible(login_url: str, session_path: Path, platform: str) -> None:
     from playwright.sync_api import sync_playwright
 
-    print(f"🌐 Opening {platform} login page: {login_url}")
-    print("   Please log in manually in the browser window.")
+    print(f"🌐 正在打开 {platform} 登录页：{login_url}")
+    print("   请在浏览器窗口中手动完成登录。")
     print("   登录成功后请关闭浏览器窗口，feedgrab 会保存登录态。\n")
 
     with sync_playwright() as p:
@@ -141,11 +149,11 @@ def _login_visible(login_url: str, session_path: Path, platform: str) -> None:
 def _login_headless(login_url: str, session_path: Path, canonical: str) -> None:
     from playwright.sync_api import sync_playwright
 
-    qr_path = SESSION_DIR / f"{canonical}_qr.png"
+    qr_path = session_path.parent / f"{canonical}_qr.png"
 
-    print(f"🔐 Headless login: {login_url}")
-    print(f"   QR code will be saved to: {qr_path}")
-    print("   Waiting for login (timeout: 5 min)...\n")
+    print(f"🔐 无头登录：{login_url}")
+    print(f"   二维码截图将保存到：{qr_path}")
+    print("   正在等待登录（超时：5 分钟）...\n")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -158,8 +166,8 @@ def _login_headless(login_url: str, session_path: Path, canonical: str) -> None:
 
         # Save QR screenshot
         page.screenshot(path=str(qr_path))
-        print(f"📸 QR screenshot saved: {qr_path}")
-        print("   Open this image and scan the QR code with your phone.\n")
+        print(f"📸 二维码截图已保存：{qr_path}")
+        print("   请打开这张图片并用手机扫码登录。\n")
 
         # Poll for cookie change (login detection)
         initial_cookies = len(context.cookies())
@@ -183,7 +191,7 @@ def _login_headless(login_url: str, session_path: Path, canonical: str) -> None:
         if logged_in:
             _save_session(context, session_path)
         else:
-            print("\n⏹ Login timed out or cancelled. No session saved.")
+            print("\n⏹ 登录超时或已取消，未保存登录态。")
 
         context.close()
         browser.close()
@@ -234,7 +242,7 @@ def _login_via_cdp(canonical: str, session_path: Path) -> bool:
 
     cookie_domains = _CDP_COOKIE_DOMAINS.get(canonical)
     if not cookie_domains:
-        print(f"CDP login not configured for platform: {canonical}")
+        print(f"当前平台未配置 CDP 登录：{canonical}")
         return False
 
     # Tier 0: Playwright connect_over_cdp (Chrome 146+ compatible)
@@ -248,10 +256,111 @@ def _login_via_cdp(canonical: str, session_path: Path) -> bool:
     if ok:
         return True
 
-    print(f"Chrome CDP not reachable on 127.0.0.1:{port}")
-    print("   Enable Remote Debugging: chrome://inspect/#remote-debugging")
-    print(f"   Or launch Chrome with: --remote-debugging-port={port}")
+    print(f"无法连接 Chrome CDP：127.0.0.1:{port}")
+    print("   请启用远程调试：chrome://inspect/#remote-debugging")
+    print(f"   或用参数启动 Chrome：--remote-debugging-port={port}")
     return False
+
+
+def _login_interactive_via_cdp(canonical: str, login_url: str, session_path: Path) -> bool:
+    """Open the platform login page in the running CDP Chrome, then save cookies."""
+    from feedgrab.config import chrome_cdp_port
+
+    port = chrome_cdp_port()
+    cookie_domains = _CDP_COOKIE_DOMAINS.get(canonical)
+    if not cookie_domains:
+        print(f"当前平台未配置 CDP 登录：{canonical}")
+        return False
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        logger.debug("Playwright not installed, skipping interactive CDP login")
+        return False
+
+    timeout = _cdp_login_timeout()
+    ws_url = f"ws://127.0.0.1:{port}/devtools/browser"
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.connect_over_cdp(ws_url)
+            context = browser.contexts[0] if browser.contexts else browser.new_context()
+            page = _prepare_cdp_login_page(context, login_url)
+            page.wait_for_timeout(2000)
+            initial_signature = _cookie_signature(
+                _filter_cdp_platform_cookies(context.cookies(), cookie_domains)
+            )
+            print(f"🌐 正在通过 Chrome CDP 打开 {canonical} 登录页：{login_url}")
+            print("   请在 Chrome 窗口完成登录，feedgrab 会自动检测并保存登录态。\n")
+
+            start = time.time()
+            while time.time() - start < timeout:
+                platform_cookies = _filter_cdp_platform_cookies(context.cookies(), cookie_domains)
+                current_signature = _cookie_signature(platform_cookies)
+                if platform_cookies and current_signature != initial_signature:
+                    _write_cdp_storage_state(session_path, platform_cookies, source="interactive CDP")
+                    with contextlib.suppress(Exception):
+                        page.close()
+                    browser.close()
+                    return True
+                if page.is_closed():
+                    if platform_cookies and current_signature != initial_signature:
+                        _write_cdp_storage_state(session_path, platform_cookies, source="interactive CDP")
+                        browser.close()
+                        return True
+                    break
+                with contextlib.suppress(Exception):
+                    page.wait_for_timeout(2000)
+            browser.close()
+    except Exception as e:
+        logger.debug(f"Interactive CDP login failed: {e}")
+        return False
+
+    print("\n⏹ CDP 登录超时，或未检测到新的 Cookie，未保存登录态。")
+    return False
+
+
+def _prepare_cdp_login_page(context, login_url: str):
+    page = _select_cdp_login_page(context)
+    with contextlib.suppress(Exception):
+        page.bring_to_front()
+    page.goto(login_url, wait_until="domcontentloaded")
+    _close_extra_blank_cdp_pages(context, page)
+    return page
+
+
+def _select_cdp_login_page(context):
+    for page in list(getattr(context, "pages", []) or []):
+        if _page_is_closed(page):
+            continue
+        if _is_blank_cdp_page_url(_safe_page_url(page)):
+            return page
+    return context.new_page()
+
+
+def _safe_page_url(page) -> str:
+    with contextlib.suppress(Exception):
+        return str(getattr(page, "url", "") or "")
+    return ""
+
+
+def _page_is_closed(page) -> bool:
+    with contextlib.suppress(Exception):
+        return bool(page.is_closed())
+    return False
+
+
+def _close_extra_blank_cdp_pages(context, keep_page) -> None:
+    for page in list(getattr(context, "pages", []) or []):
+        if page is keep_page or _page_is_closed(page):
+            continue
+        if _is_blank_cdp_page_url(_safe_page_url(page)):
+            with contextlib.suppress(Exception):
+                page.close()
+
+
+def _is_blank_cdp_page_url(url: str) -> bool:
+    text = str(url or "").strip().lower()
+    return not text or text == "about:blank" or text.startswith("chrome://newtab") or text.startswith("chrome://new-tab-page")
 
 
 def _cdp_via_playwright(
@@ -284,25 +393,13 @@ def _cdp_via_playwright(
         logger.debug("CDP connected but no cookies found")
         return False
 
-    # Filter cookies for target platform
-    platform_cookies = [
-        c for c in all_cookies
-        if any(c.get("domain", "").endswith(d) or c.get("domain", "") == d.lstrip(".")
-               for d in cookie_domains)
-    ]
+    platform_cookies = _filter_cdp_platform_cookies(all_cookies, cookie_domains)
 
     if not platform_cookies:
-        print(f"No {canonical} cookies found. Are you logged in to the site in Chrome?")
+        print(f"未找到 {canonical} Cookie。请确认已在 Chrome 中登录对应网站。")
         return False
 
-    # Playwright cookies are already in storage_state format
-    state = {"cookies": platform_cookies, "origins": []}
-    with open(session_path, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)
-    os.chmod(str(session_path), 0o600)
-
-    logger.info(f"CDP session saved (Playwright): {session_path}")
-    print(f"\n✅ Session saved via CDP: {session_path} ({len(platform_cookies)} cookies)")
+    _write_cdp_storage_state(session_path, platform_cookies, source="Playwright CDP")
     return True
 
 
@@ -334,7 +431,7 @@ def _cdp_via_websocket(
     try:
         import websocket
     except ImportError:
-        print("websocket-client not installed. Run: pip install websocket-client")
+        print("未安装 websocket-client。请运行：pip install websocket-client")
         return False
 
     try:
@@ -353,7 +450,7 @@ def _cdp_via_websocket(
         return False
 
     if not cookies:
-        print(f"No cookies found for {canonical}. Are you logged in?")
+        print(f"未找到 {canonical} Cookie。请确认已登录。")
         return False
 
     # Convert CDP cookies to Playwright storage_state format
@@ -373,11 +470,37 @@ def _cdp_via_websocket(
             "sameSite": c.get("sameSite", "None"),
         })
 
-    state = {"cookies": pw_cookies, "origins": []}
+    _write_cdp_storage_state(session_path, pw_cookies, source="WebSocket CDP")
+    return True
+
+
+def _filter_cdp_platform_cookies(cookies: list, cookie_domains: list) -> list:
+    return [
+        c for c in cookies
+        if any(c.get("domain", "").endswith(d) or c.get("domain", "") == d.lstrip(".")
+               for d in cookie_domains)
+    ]
+
+
+def _cookie_signature(cookies: list) -> set[tuple[str, str, str]]:
+    return {
+        (str(cookie.get("domain", "")), str(cookie.get("name", "")), str(cookie.get("value", "")))
+        for cookie in cookies
+    }
+
+
+def _write_cdp_storage_state(session_path: Path, cookies: list, *, source: str) -> None:
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    state = {"cookies": cookies, "origins": []}
     with open(session_path, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, ensure_ascii=False)
     os.chmod(str(session_path), 0o600)
+    logger.info(f"CDP session saved ({source}): {session_path}")
+    print(f"\n✅ 已通过 CDP 保存登录态：{session_path}（{len(cookies)} 个 Cookie）")
 
-    logger.info(f"CDP session saved (WebSocket): {session_path}")
-    print(f"\n✅ Session saved via CDP: {session_path} ({len(pw_cookies)} cookies)")
-    return True
+
+def _cdp_login_timeout() -> int:
+    try:
+        return max(10, int(os.getenv("CHROME_CDP_LOGIN_TIMEOUT", "300")))
+    except ValueError:
+        return 300

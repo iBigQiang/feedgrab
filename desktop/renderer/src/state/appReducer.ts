@@ -55,7 +55,7 @@ export type AppState = {
 
 export type AppAction =
   | { type: "view/select"; payload: ViewKey }
-  | { type: "settings/load"; payload: SettingsSnapshot }
+  | { type: "settings/load"; payload: SettingsSnapshot; resolvedOutputDirectory: string }
   | { type: "settings/schema"; payload: SettingsSchema }
   | { type: "settings/edit"; payload: { name: string; value: SettingsFieldValue } }
   | { type: "settings/saved"; payload: { ok: boolean; updated: Array<{ name: string; value: string }>; error?: string } }
@@ -76,7 +76,7 @@ export type AppAction =
 export function createInitialAppState(): AppState {
   return {
     selectedView: "fetch",
-    outputDirectory: "D:\\Notes\\Feeds",
+    outputDirectory: "",
     jobs: [],
     logs: [
       {
@@ -149,7 +149,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         settings: action.payload,
-        outputDirectory: action.payload.outputDirectory
+        outputDirectory: action.resolvedOutputDirectory
       };
     case "settings/schema":
       return {
@@ -178,14 +178,17 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ],
         nextLogSeq: state.nextLogSeq + 1
       };
-    case "settings/outputDirectory":
+    case "settings/outputDirectory": {
+      const nextOutputDirectory = action.payload;
+      const fallbackOutputDirectory = state.settings?.obsidianVault || nextOutputDirectory;
       return {
         ...state,
-        outputDirectory: action.payload,
-        settings: state.settings ? { ...state.settings, outputDirectory: action.payload } : state.settings,
+        outputDirectory: fallbackOutputDirectory,
+        settings: state.settings ? { ...state.settings, outputDirectory: nextOutputDirectory } : state.settings,
         logs: [...state.logs, createLog(state.nextLogSeq, "info", `输出目录已选择：${action.payload}`)],
         nextLogSeq: state.nextLogSeq + 1
       };
+    }
     case "doctor/load":
       return { ...state, doctor: action.payload };
     case "output/load":

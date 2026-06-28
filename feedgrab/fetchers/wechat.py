@@ -111,8 +111,8 @@ async def fetch_wechat(url: str) -> Dict[str, Any]:
         logger.info(f"[WeChat] Tier 3 — Browser retry: {url}")
         return await _browser_fetch(url)
     except Exception as e:
-        logger.error(f"[WeChat] All tiers failed: {e}")
+        logger.error(f"[WeChat] 所有抓取层都失败：{e}")
         raise RuntimeError(
-            f"All WeChat fetch methods failed.\n"
-            f"   Last error: {e}"
+            "微信公众号文章抓取所有兜底方式都失败。\n"
+            f"   最后错误：{e}"
         )

@@ -90,5 +90,21 @@ def test_mpweixin_account_preserves_session_expired_error(monkeypatch, tmp_path)
         fake_setup_resource_blocking,
     )
 
-    with pytest.raises(RuntimeError, match="MP session expired"):
+    with pytest.raises(RuntimeError, match="微信公众号后台登录态已过期或无效"):
         asyncio.run(mpweixin_account.fetch_account_articles("林月半子的AI笔记", delay=0))
+
+
+def test_mpweixin_account_missing_session_error_is_chinese(monkeypatch, tmp_path):
+    from feedgrab.fetchers import mpweixin_account
+
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+
+    monkeypatch.setattr(mpweixin_account, "get_session_dir", lambda: session_dir)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        asyncio.run(mpweixin_account.fetch_account_articles("老码小张", delay=0))
+
+    message = str(excinfo.value)
+    assert "微信公众号后台登录态文件不存在" in message
+    assert "'feedgrab login wechat'" in message

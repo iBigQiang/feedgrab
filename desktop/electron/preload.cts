@@ -39,8 +39,8 @@ const api: FeedgrabIpcApi = {
   outputList: () => ipcRenderer.invoke("feedgrab:outputList") as ReturnType<FeedgrabIpcApi["outputList"]>,
   openPath: (path: string) =>
     ipcRenderer.invoke("feedgrab:openPath", path) as ReturnType<FeedgrabIpcApi["openPath"]>,
-  chooseOutputDirectory: () =>
-    ipcRenderer.invoke("feedgrab:chooseOutputDirectory") as ReturnType<FeedgrabIpcApi["chooseOutputDirectory"]>,
+  chooseOutputDirectory: (options) =>
+    ipcRenderer.invoke("feedgrab:chooseOutputDirectory", options) as ReturnType<FeedgrabIpcApi["chooseOutputDirectory"]>,
   fetchRemoteMarkdown: (url: string) =>
     ipcRenderer.invoke("feedgrab:fetchRemoteMarkdown", url) as ReturnType<FeedgrabIpcApi["fetchRemoteMarkdown"]>,
   onWorkerEvent: (callback: (event: FeedgrabWorkerEvent) => void) => {

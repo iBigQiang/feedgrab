@@ -40,11 +40,11 @@ B66642BE164F94C9E6959082467AD4158327ADA9E836617B7BA729F9629E72B2
 
 打开“设置”页面后，建议先确认这些基础设置：
 
-- `输出目录`：抓取结果保存位置，推荐指向 Obsidian 收件箱或专门的资料库目录。
-- `Obsidian Vault（高优先级）`：可选；填写后优先作为 Markdown 输出根目录。
-- `登录态和数据目录`：保存 cookie/session 数据的位置。安装包会带空白模板目录，真实登录信息不会内置。
+- `输出目录`：抓取结果保存位置。安装版首次默认指向安装根目录的 `output`，例如 `D:\feedgrab Desktop\output`；也可以改成 Obsidian 收件箱或专门的资料库目录。
+- `Obsidian Vault`：可选，高优先级；安装初始留空，填写后会优先作为 Markdown 输出根目录。
+- `登录态和数据目录`：保存 cookie/session 数据的位置。安装版首次默认指向安装根目录的 `sessions`，例如 `D:\feedgrab Desktop\sessions`。安装包会带空白模板文件，真实登录信息不会内置。
 - `浏览器 User-Agent`：默认自动从当前环境读取，也可以手动覆盖。
-- `优先从 Chrome CDP 提取登录态`：用于复用本机 Chrome 登录状态。
+- `优先从 Chrome CDP 提取登录态`：用于复用或启动带 CDP 端口的本机 Chrome。点击平台“登录”时会先走 CDP 抽取/登录并保存到当前 `登录态和数据目录`，如果 CDP 连接或抽取失败，再回退到普通 Playwright 登录窗口。
 - `Chrome CDP 端口`：默认 `9222`，客户端会尽量自动检测和启动可用端口。
 - `启用代理` / `代理地址` / `不走代理地址`：默认关闭；代理地址支持 `http://127.0.0.1:7890`、`socks5://127.0.0.1:7890`、`http://用户名:密码@IP:端口`，密码会在界面和日志中隐藏。不走代理地址默认 `127.0.0.1,localhost`，避免本地 worker、CDP 端口和客户端内部服务被代理干扰。
 
@@ -60,10 +60,10 @@ B66642BE164F94C9E6959082467AD4158327ADA9E836617B7BA729F9629E72B2
 2. 从安装目录或本地 `sessions` 目录导入 JSON cookie 文件。
 3. 点击单个平台“登录”，打开浏览器，由用户完成登录后保存状态。
 
-安装包会带一份空白模板目录：
+安装包不再直接把模板写入安装根目录，而是把 `desktop/session-templates/` 以 `extraResources` 打包到安装资源目录，并在启动时按以下规则补齐到 `FEEDGRAB_DATA_DIR`：
 
 ```text
-sessions/
+FEEDGRAB_DATA_DIR/
   x_2.json
   x_3.json
   wechat.json
@@ -72,7 +72,9 @@ sessions/
   ...
 ```
 
-这些模板只保留字段结构，不包含真实 cookie。用户可以复制模板并填写自己的参数，也可以通过客户端登录流程自动生成真实登录态。真实 cookie、token、API Key 不会在界面中明文展示。
+模板里包含空白字段结构，不包含真实 cookie。启动时会跳过同名文件，避免覆盖用户已存在的登录态文件。安装版默认登录态目录仍为 `FEEDGRAB_DATA_DIR` 指向的 `安装目录\\sessions`，用户可以在设置页改到其他目录。真实 cookie、token、API Key 不会在界面中明文展示。
+
+卸载器会在普通卸载时询问是否保留 `output` 与 `sessions`。如果选择保留、执行静默卸载或升级，卸载器会原地保留安装目录中的 `output` 与 `sessions`，并保留安装目录父路径结构，例如 `D:\feedgrab Desktop\output` 与 `D:\feedgrab Desktop\sessions`；重新安装到同一路径时，同名登录态和输出文件会跳过，不会被空白模板覆盖。
 
 ## 基本抓取流程
 

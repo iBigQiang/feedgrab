@@ -133,7 +133,7 @@ def test_worker_fetch_applies_output_dir_only_during_job(monkeypatch):
         _request("job_output", "fetch", {"urls": ["https://example.test/a"], "output_dir": "D:/gui-output"}),
     ]))
 
-    assert service.seen_output_dirs == [("D:/gui-output", "D:/gui-output")]
+    assert service.seen_output_dirs == [("D:/gui-output", "")]
     assert os.environ["OUTPUT_DIR"] == "D:/existing"
     assert os.environ["OBSIDIAN_VAULT"] == "D:/existing-vault"
     assert events[-1]["result"] == {"fetched": 1, "errors": 0}
@@ -171,7 +171,7 @@ def test_worker_structured_search_task_maps_to_command_runner_without_shell(monk
         )
     )
 
-    assert calls == [("x-so", ["claude code,openclaw"], "D:/gui-output", "D:/gui-output")]
+    assert calls == [("x-so", ["claude code,openclaw"], "D:/gui-output", "")]
     assert any(
         event.get("event") == "log"
         and event.get("id") == "job_search"
@@ -325,8 +325,8 @@ def test_worker_structured_account_zero_output_is_failure(monkeypatch):
     from feedgrab.worker import SidecarWorker
 
     def fake_command_runner(command, args):
-        print("✅ WeChat account fetch complete: '强子手记'")
-        print("   Total: 0, Fetched: 0, Skipped: 0, Failed: 0")
+        print("✅ 微信公众号账号批量抓取完成：'强子手记'")
+        print("   总数：0，已抓取：0，已跳过：0，失败：0")
 
     events = asyncio.run(
         _run_lines(
@@ -426,6 +426,30 @@ def test_worker_can_cancel_running_fetch_job():
     }
 
 
+def test_worker_fetch_timeout_fails_job(monkeypatch):
+    from feedgrab.worker import SidecarWorker
+
+    monkeypatch.setenv("FEEDGRAB_WORKER_FETCH_TIMEOUT", "0.05")
+
+    async def scenario():
+        worker = SidecarWorker(fetch_service=BlockingFetchService())
+        await worker.start()
+        await worker.handle_line(_request("job_timeout", "fetch", {"urls": ["https://example.test/timeout"]}))
+        await asyncio.wait_for(worker.wait_idle(), timeout=1)
+        return worker.events
+
+    events = asyncio.run(scenario())
+
+    error = next(event for event in events if event.get("event") == "error")
+    assert error["id"] == "job_timeout"
+    assert error["method"] == "fetch"
+    assert error["error"]["code"] == "fetch_timeout"
+    assert "抓取超时" in error["error"]["message"]
+    assert events[-1]["event"] == "done"
+    assert events[-1]["result"]["fetched"] == 0
+    assert events[-1]["result"]["errors"] == 1
+
+
 def test_worker_errors_are_json_safe_and_redacted():
     from feedgrab.worker import SidecarWorker
 
@@ -436,6 +460,7 @@ def test_worker_errors_are_json_safe_and_redacted():
     error = next(event for event in events if event["event"] == "error")
     json.dumps(error)
     assert error["id"] == "job_secret"
+    assert error["method"] == "fetch"
     assert error["error"]["code"] == "fetch_error"
     assert error["error"]["details"]["api_key"] == "[redacted]"
     assert error["error"]["details"]["nested"]["cookie"] == "[redacted]"
@@ -556,6 +581,194 @@ def test_worker_handles_settings_schema_update_and_import_login_sessions():
     assert login_service.imported_source_dir == "D:/installer/sessions"
     assert login_service.imported_platform == "twitter"
     assert login_service.imported_sync is True
+
+
+def test_worker_settings_schema_uses_install_output_and_sessions_defaults(monkeypatch, tmp_path):
+    from feedgrab.service.settings import SettingsService
+    from feedgrab.worker import SidecarWorker
+
+    settings_path = tmp_path / "settings.json"
+    install_root = tmp_path / "feedgrab Desktop"
+    install_output = install_root / "output"
+    install_sessions = install_root / "sessions"
+    settings_path.write_text(
+        json.dumps({"values": {"OUTPUT_DIR": "", "FEEDGRAB_DATA_DIR": ""}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FEEDGRAB_WORKER_MODE", "true")
+    monkeypatch.setenv("FEEDGRAB_SETTINGS_PATH", str(settings_path))
+    monkeypatch.setenv("OUTPUT_DIR", str(install_output))
+    monkeypatch.setenv("FEEDGRAB_INSTALL_SESSIONS_DIR", str(install_sessions))
+    monkeypatch.setenv("FEEDGRAB_DATA_DIR", str(install_sessions))
+
+    worker = SidecarWorker(settings_service=SettingsService(settings_path=settings_path))
+    events = asyncio.run(_run_lines(worker, [_request("schema", "settings_schema")]))
+    done = next(event for event in events if event.get("id") == "schema" and event.get("event") == "done")
+    core = next(platform for platform in done["result"]["platforms"] if platform["id"] == "core")
+    fields = {field["name"]: field for field in core["fields"]}
+
+    assert fields["OUTPUT_DIR"]["value"] == str(install_output)
+    assert fields["FEEDGRAB_DATA_DIR"]["value"] == str(install_sessions)
+
+
+def test_worker_settings_update_refreshes_login_service_session_dir(monkeypatch, tmp_path):
+    from feedgrab.service.login import LoginService
+    from feedgrab.service.settings import SettingsService
+    from feedgrab.worker import SidecarWorker
+
+    old_dir = tmp_path / "old-sessions"
+    new_dir = tmp_path / "new-sessions"
+    settings_path = tmp_path / "settings.json"
+    monkeypatch.setenv("FEEDGRAB_SETTINGS_PATH", str(settings_path))
+    monkeypatch.setenv("FEEDGRAB_DATA_DIR", str(old_dir))
+
+    worker = SidecarWorker(
+        fetch_service=FakeFetchService(),
+        settings_service=SettingsService(settings_path=settings_path),
+        login_service=LoginService(),
+    )
+
+    events = asyncio.run(
+        _run_lines(
+            worker,
+            [
+                _request("update", "settings_update", {"values": {"FEEDGRAB_DATA_DIR": str(new_dir)}}),
+                _request("login", "login_status", {"platforms": ["feishu"]}),
+            ],
+        )
+    )
+
+    assert any(event.get("id") == "login" and event.get("event") == "done" for event in events)
+    assert worker.login_service.session_dir == new_dir
+
+
+def test_login_uses_current_session_dir_after_env_change(monkeypatch, tmp_path):
+    import importlib
+    import feedgrab.login as login_module
+
+    old_dir = tmp_path / "old-sessions"
+    new_dir = tmp_path / "new-sessions"
+    captured = []
+
+    monkeypatch.setenv("FEEDGRAB_DATA_DIR", str(old_dir))
+    login_module = importlib.reload(login_module)
+    monkeypatch.setenv("FEEDGRAB_DATA_DIR", str(new_dir))
+    monkeypatch.setenv("CHROME_CDP_LOGIN", "true")
+
+    def fake_login_via_cdp(canonical, session_path):
+        captured.append((canonical, session_path))
+        return True
+
+    monkeypatch.setattr(login_module, "_login_via_cdp", fake_login_via_cdp)
+
+    login_module.login("feishu")
+
+    assert captured == [("feishu", new_dir / "feishu.json")]
+
+
+def test_login_cdp_mode_opens_interactive_cdp_when_no_existing_cookies(monkeypatch, tmp_path):
+    import importlib
+    import feedgrab.login as login_module
+
+    session_dir = tmp_path / "sessions"
+    captured = []
+
+    monkeypatch.setenv("FEEDGRAB_DATA_DIR", str(session_dir))
+    monkeypatch.setenv("CHROME_CDP_LOGIN", "true")
+    login_module = importlib.reload(login_module)
+
+    monkeypatch.setattr(login_module, "_login_via_cdp", lambda canonical, session_path: False)
+
+    def fake_interactive_cdp(canonical, login_url, session_path):
+        captured.append((canonical, login_url, session_path))
+        return True
+
+    monkeypatch.setattr(login_module, "_login_interactive_via_cdp", fake_interactive_cdp)
+    monkeypatch.setattr(
+        login_module,
+        "_login_visible",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not fall back")),
+    )
+
+    login_module.login("feishu")
+
+    assert captured == [("feishu", "https://my.feishu.cn", session_dir / "feishu.json")]
+
+
+def test_login_cdp_reuses_blank_page_for_interactive_login():
+    import importlib
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+
+    class FakePage:
+        def __init__(self, url):
+            self.url = url
+            self.closed = False
+            self.goto_calls = []
+            self.fronted = False
+
+        def is_closed(self):
+            return self.closed
+
+        def bring_to_front(self):
+            self.fronted = True
+
+        def goto(self, url, wait_until=None):
+            self.goto_calls.append((url, wait_until))
+            self.url = url
+
+        def close(self):
+            self.closed = True
+
+    class FakeContext:
+        def __init__(self):
+            self.primary_blank = FakePage("about:blank")
+            self.extra_blank = FakePage("chrome://newtab/")
+            self.existing_app = FakePage("https://example.com/")
+            self.pages = [self.primary_blank, self.extra_blank, self.existing_app]
+            self.new_page_calls = 0
+
+        def new_page(self):
+            self.new_page_calls += 1
+            page = FakePage("about:blank")
+            self.pages.append(page)
+            return page
+
+    context = FakeContext()
+
+    page = login_module._prepare_cdp_login_page(context, "https://my.feishu.cn")
+
+    assert page is context.primary_blank
+    assert context.new_page_calls == 0
+    assert context.primary_blank.fronted is True
+    assert context.primary_blank.goto_calls == [("https://my.feishu.cn", "domcontentloaded")]
+    assert context.extra_blank.closed is True
+    assert context.existing_app.closed is False
+
+
+def test_login_cdp_mode_falls_back_to_visible_login_when_cdp_fails(monkeypatch, tmp_path):
+    import importlib
+    import feedgrab.login as login_module
+
+    session_dir = tmp_path / "sessions"
+    captured = []
+
+    monkeypatch.setenv("FEEDGRAB_DATA_DIR", str(session_dir))
+    monkeypatch.setenv("CHROME_CDP_LOGIN", "true")
+    login_module = importlib.reload(login_module)
+
+    monkeypatch.setattr(login_module, "_login_via_cdp", lambda canonical, session_path: False)
+    monkeypatch.setattr(login_module, "_login_interactive_via_cdp", lambda canonical, login_url, session_path: False)
+
+    def fake_login_visible(login_url, session_path, platform):
+        captured.append((login_url, session_path, platform))
+
+    monkeypatch.setattr(login_module, "_login_visible", fake_login_visible)
+
+    login_module.login("feishu")
+
+    assert captured == [("https://my.feishu.cn", session_dir / "feishu.json", "feishu")]
 
 
 class FakeFetchService:

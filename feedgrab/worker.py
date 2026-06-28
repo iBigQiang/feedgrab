@@ -25,6 +25,7 @@ except ModuleNotFoundError:  # pragma: no cover - protects parallel service edit
 
 
 PROTOCOL_VERSION = 1
+DEFAULT_FETCH_TIMEOUT_SECONDS = 300.0
 SUPPORTED_METHODS = (
     "ping",
     "detect_platform",
@@ -67,7 +68,8 @@ _ARTIFACT_PATH_LINE_RE = re.compile(
     re.IGNORECASE,
 )
 _ZERO_ACCOUNT_OUTPUT_RE = re.compile(
-    r"Total:\s*0,\s*Fetched:\s*0,\s*Skipped:\s*0,\s*Failed:\s*0",
+    r"(?:Total:\s*0,\s*Fetched:\s*0,\s*Skipped:\s*0,\s*Failed:\s*0|"
+    r"总数：0，已抓取：0，已跳过：0，失败：0)",
     re.IGNORECASE,
 )
 
@@ -162,7 +164,7 @@ class SidecarWorker:
         method = request.get("method")
         params = request.get("params") or {}
         if not isinstance(params, dict):
-            self._emit_error(request_id, "invalid_params", "params must be an object")
+            self._emit_error(request_id, "invalid_params", "参数必须是对象")
             return
 
         if method == "fetch":
@@ -204,14 +206,14 @@ class SidecarWorker:
         elif method == "output_list":
             self._emit_done(request_id, method, self._output_list())
         else:
-            self._emit_error(request_id, "unknown_method", f"unknown method: {method}")
+            self._emit_error(request_id, "unknown_method", f"未知请求方法：{method}")
 
     def _start_fetch_job(self, request_id: str, params: dict[str, Any]) -> None:
         if not request_id:
-            self._emit_error(None, "invalid_request", "fetch request requires id")
+            self._emit_error(None, "invalid_request", "抓取请求缺少 id")
             return
         if request_id in self._tasks:
-            self._emit_error(request_id, "duplicate_job", "job id already exists")
+            self._emit_error(request_id, "duplicate_job", "任务 id 已存在")
             return
 
         urls = params.get("urls")
@@ -220,7 +222,7 @@ class SidecarWorker:
         if urls is None:
             urls = []
         if not isinstance(urls, list) or not all(isinstance(url, str) for url in urls):
-            self._emit_error(request_id, "invalid_params", "fetch params.urls must be a list of strings")
+            self._emit_error(request_id, "invalid_params", "抓取参数 urls 必须是字符串列表")
             return
 
         output_dir = params.get("output_dir") or params.get("outputDirectory") or ""
@@ -229,7 +231,7 @@ class SidecarWorker:
             targets = [targets]
         if targets is not None:
             if not isinstance(targets, list) or not all(isinstance(target, str) for target in targets):
-                self._emit_error(request_id, "invalid_params", "fetch params.targets must be a list of strings")
+                self._emit_error(request_id, "invalid_params", "抓取参数 targets 必须是字符串列表")
                 return
         if targets and not urls:
             platform = str(params.get("platform") or "").strip().lower()
@@ -244,6 +246,7 @@ class SidecarWorker:
     async def _run_fetch_job(self, request_id: str, urls: list[str], output_dir: str = "") -> None:
         fetched = 0
         errors = 0
+        last_error = ""
         try:
             async with self._fetch_lock:
                 with _temporary_output_environment(output_dir):
@@ -261,7 +264,7 @@ class SidecarWorker:
                             "event": "log",
                             "method": "fetch",
                             "level": "info",
-                            "message": "fetch job started",
+                            "message": "抓取任务已启动",
                         }
                     )
                     for index, url in enumerate(urls, start=1):
@@ -271,18 +274,33 @@ class SidecarWorker:
                                 "event": "progress",
                                 "method": "fetch",
                                 "stage": "fetch",
-                                "message": "fetching",
+                                "message": "正在抓取",
                                 "url": url,
                                 "result": {"index": index, "total": len(urls)},
                             }
                         )
                         try:
-                            result = await self.fetch_service.fetch_url(url)
+                            result = await _fetch_url_with_timeout(self.fetch_service, url)
                         except asyncio.CancelledError:
                             raise
+                        except asyncio.TimeoutError:
+                            errors += 1
+                            timeout = _worker_fetch_timeout()
+                            timeout_text = _format_timeout(timeout)
+                            last_error = f"抓取超时（{timeout_text}）：{url}"
+                            self._emit_error(
+                                request_id,
+                                "fetch_timeout",
+                                last_error,
+                                details={"url": url, "timeout_seconds": timeout},
+                                url=url,
+                                method="fetch",
+                            )
+                            continue
                         except Exception as exc:
                             errors += 1
-                            self._emit_exception(request_id, exc, url=url)
+                            last_error = str(exc)
+                            self._emit_exception(request_id, exc, url=url, method="fetch")
                             continue
 
                         fetched += 1
@@ -298,7 +316,10 @@ class SidecarWorker:
                                 }
                             )
 
-            self._emit_done(request_id, "fetch", {"fetched": fetched, "errors": errors})
+            result = {"fetched": fetched, "errors": errors}
+            if last_error:
+                result["error"] = last_error
+            self._emit_done(request_id, "fetch", result)
         except asyncio.CancelledError:
             self._emit(
                 {
@@ -447,7 +468,9 @@ class SidecarWorker:
             except SystemExit as exc:
                 code = exc.code if isinstance(exc.code, int) else 1
                 if code != 0:
-                    message = _last_error_line(stdout.getvalue(), stderr.getvalue()) or f"{command} exited with code {code}"
+                    message = _last_error_line(stdout.getvalue(), stderr.getvalue()) or (
+                        f"命令执行失败（退出码 {code}）：{command}"
+                    )
                     raise StructuredCommandError(
                         message,
                         stdout_text=stdout.getvalue(),
@@ -568,11 +591,26 @@ class SidecarWorker:
         if values is None:
             values = params.get("settings")
         if not isinstance(values, dict):
-            raise ValueError("settings_update params.values must be an object")
+            raise ValueError("设置更新参数 values 必须是对象")
         update = getattr(self.settings_service, "update", None)
         if callable(update):
-            return _to_payload(update(values))
+            payload = _to_payload(update(values))
+            self._refresh_path_dependent_services(values, payload)
+            return payload
         return {"available": False}
+
+    def _refresh_path_dependent_services(self, values: dict[str, Any], payload: dict[str, Any]) -> None:
+        updated_names = {
+            str(item.get("name"))
+            for item in payload.get("updated", [])
+            if isinstance(item, dict) and item.get("name")
+        }
+        if not updated_names:
+            updated_names = {str(name) for name in values}
+        if "FEEDGRAB_DATA_DIR" in updated_names and isinstance(self.login_service, LoginService):
+            self.login_service = LoginService()
+        if "OUTPUT_DIR" in updated_names and isinstance(self.output_service, OutputService):
+            self.output_service = OutputService()
 
     def _login_status(self, params: dict[str, Any]) -> dict[str, Any]:
         platforms = params.get("platforms") or []
@@ -583,7 +621,7 @@ class SidecarWorker:
     def _import_login_sessions(self, params: dict[str, Any]) -> dict[str, Any]:
         source_dir = params.get("source_dir") or params.get("installer_session_dir") or ""
         if not isinstance(source_dir, str) or not source_dir:
-            raise ValueError("import_login_sessions params.source_dir is required")
+            raise ValueError("导入登录态需要 source_dir 参数")
         overwrite = bool(params.get("overwrite", False))
         sync = bool(params.get("sync", False))
         import_sessions = getattr(self.login_service, "import_sessions", None)
@@ -618,6 +656,7 @@ class SidecarWorker:
         recoverable: bool = True,
         details: dict[str, Any] | None = None,
         url: str = "",
+        method: str | None = None,
     ) -> None:
         event: dict[str, Any] = {
             "id": request_id,
@@ -629,11 +668,13 @@ class SidecarWorker:
                 "details": details or {},
             },
         }
+        if method:
+            event["method"] = method
         if url:
             event["url"] = url
         self._emit(event)
 
-    def _emit_exception(self, request_id: str | None, exc: Exception, *, url: str = "") -> None:
+    def _emit_exception(self, request_id: str | None, exc: Exception, *, url: str = "", method: str | None = None) -> None:
         if isinstance(exc, ServiceError):
             payload = exc.to_dict()
             self._emit_error(
@@ -643,6 +684,7 @@ class SidecarWorker:
                 recoverable=payload["recoverable"],
                 details=payload["details"],
                 url=url,
+                method=method,
             )
             return
 
@@ -653,6 +695,7 @@ class SidecarWorker:
             recoverable=True,
             details={},
             url=url,
+            method=method,
         )
 
     def _emit_structured_artifact(self, request_id: str, artifact_path: str) -> None:
@@ -716,7 +759,7 @@ def _coerce_settings_schema_value(field: dict[str, Any], value: Any) -> Any:
 def _structured_command(platform: str, mode: str) -> str:
     command = _STRUCTURED_COMMANDS.get((platform, mode))
     if command is None:
-        raise ValueError(f"unsupported structured fetch task: platform={platform or 'unset'} mode={mode or 'unset'}")
+        raise ValueError(f"不支持的结构化抓取任务：platform={platform or 'unset'} mode={mode or 'unset'}")
     return command
 
 
@@ -732,6 +775,33 @@ def _quote_cli_arg(value: str) -> str:
     return value
 
 
+async def _fetch_url_with_timeout(fetch_service: Any, url: str) -> Any:
+    timeout = _worker_fetch_timeout()
+    fetch = fetch_service.fetch_url(url)
+    if timeout is None:
+        return await fetch
+    return await asyncio.wait_for(fetch, timeout=timeout)
+
+
+def _worker_fetch_timeout() -> float | None:
+    raw = os.getenv("FEEDGRAB_WORKER_FETCH_TIMEOUT", "").strip()
+    if not raw:
+        return DEFAULT_FETCH_TIMEOUT_SECONDS
+    try:
+        timeout = float(raw)
+    except ValueError:
+        return DEFAULT_FETCH_TIMEOUT_SECONDS
+    return None if timeout <= 0 else timeout
+
+
+def _format_timeout(timeout: float | None) -> str:
+    if timeout is None:
+        return "未启用超时限制"
+    if timeout.is_integer():
+        return f"{int(timeout)}s"
+    return f"{timeout:g}s"
+
+
 @contextlib.contextmanager
 def _temporary_output_environment(output_dir: str):
     if not output_dir:
@@ -741,8 +811,8 @@ def _temporary_output_environment(output_dir: str):
     keys = ("OUTPUT_DIR", "OBSIDIAN_VAULT")
     previous = {key: os.environ.get(key) for key in keys}
     try:
-        for key in keys:
-            os.environ[key] = output_dir
+        os.environ["OUTPUT_DIR"] = output_dir
+        os.environ["OBSIDIAN_VAULT"] = ""
         yield
     finally:
         for key, value in previous.items():
@@ -823,15 +893,15 @@ def _default_command_runner(command: str, args: list[str]) -> None:
         return
     if command == "mpweixin-id":
         if not args:
-            raise ValueError("mpweixin-id requires an account name")
+            raise ValueError("mpweixin-id 需要公众号名称")
         cli.cmd_mpweixin_account(args[0])
         return
     if command == "mpweixin-so":
         if not args:
-            raise ValueError("mpweixin-so requires a keyword")
+            raise ValueError("mpweixin-so 需要关键词")
         cli.cmd_wechat_search(args[0])
         return
-    raise ValueError(f"unsupported command: {command}")
+    raise ValueError(f"不支持的命令：{command}")
 
 
 def _json_safe(value: Any, *, key: str = "") -> Any:
@@ -858,6 +928,7 @@ def _is_sensitive_key(key: str) -> bool:
 
 
 async def _run_stdio(stdin: TextIO, stdout: TextIO) -> None:
+    os.environ["FEEDGRAB_WORKER_MODE"] = "true"
     _configure_worker_logging()
     worker = SidecarWorker(output=stdout)
     await worker.start()
