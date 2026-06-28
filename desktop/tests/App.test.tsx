@@ -185,13 +185,13 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "赞助" }));
 
     expect(screen.getByRole("heading", { name: "赞助" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /feedgrab Desktop\s*赞助商/ })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "https://github.com/iBigQiang/feedgrab" })).toHaveAttribute(
-      "href",
-      "https://edgeone.gh-proxy.com/https://github.com/iBigQiang/feedgrab/tree/feedgrab-desktop"
-    );
     expect(screen.getByRole("heading", { name: /赞助商/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /捐赠打赏/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "想出现在这里？" })).toHaveAttribute("href", "mailto:ibigqiang@gmail.com");
+    expect(screen.getByRole("link", { name: "此链接" })).toHaveAttribute(
+      "href",
+      "https://hitu.me/zh/notices/order-and-get-20-off-in-points"
+    );
     const sponsorTable = screen.getByRole("table", { name: "赞助商列表" });
     expect(within(sponsorTable).getAllByRole("row").length).toBeGreaterThanOrEqual(1);
     expect(within(sponsorTable).getAllByRole("img", { name: /嗨图象/ })[0].getAttribute("src")).toMatch(/^https:\/\//);
