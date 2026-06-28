@@ -1,7 +1,7 @@
 # feedgrab Desktop 中文使用说明
 
 > 适用分支：`feedgrab-desktop`
-> 文档日期：2026-06-27
+> 文档日期：2026-06-28
 > 当前状态：Windows 安装器预览版。已提供 `feedgrab-desktop` 分支安装包，尚未提供代码签名、自动更新、真实授权激活或应用商店发布包。
 
 `feedgrab Desktop` 是 feedgrab 的桌面 GUI 客户端分支，技术栈为：
@@ -36,9 +36,9 @@ Electron + Vite + React + TypeScript
 
 当前预览安装包发布在 GitHub Releases：
 
-- 发布页：<https://github.com/iBigQiang/feedgrab/releases/tag/desktop-v0.1.0-20260627>
-- Windows 安装包：<https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.0-20260627/feedgrab-desktop-setup-0.1.0.exe>
-- SHA256：`4AAD93A5F323C924B3B1D9FF07EFA4A5D02C9C14E6BB78E0F9D62E7B4168499E`
+- 发布页：<https://github.com/iBigQiang/feedgrab/releases/tag/desktop-v0.1.1-20260628>
+- Windows 安装包：<https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.1-20260628/feedgrab-desktop-setup-0.1.1.exe>
+- SHA256：`92F661F9811283674EB69944A90B2E3ED792C8480AE71A287973B05FFFFC792D`
 
 安装包由 `feedgrab-desktop` 分支构建，内置 Python sidecar worker、Playwright Chromium runtime 和空白 session 模板。安装包未做代码签名，Windows 首次运行可能出现安全提示。
 

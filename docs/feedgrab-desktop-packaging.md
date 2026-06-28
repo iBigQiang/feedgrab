@@ -16,20 +16,21 @@
 
 | 项 | 值 |
 |---|---|
-| Release tag | `desktop-v0.1.0-20260627` |
-| 发布页 | <https://github.com/iBigQiang/feedgrab/releases/tag/desktop-v0.1.0-20260627> |
-| 下载地址 | <https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.0-20260627/feedgrab-desktop-setup-0.1.0.exe> |
-| 本地构建目录 | `D:\AiCode\feedgrab\desktop\release-packages\20260627-215707\` |
-| 本地原始文件名 | `feedgrab Desktop Setup 0.1.0.exe` |
-| Release asset 文件名 | `feedgrab-desktop-setup-0.1.0.exe` |
-| 文件大小 | `384214024` bytes |
-| 打包时间 | `2026-06-27 21:58:01 +08:00` |
-| SHA256 | `B66642BE164F94C9E6959082467AD4158327ADA9E836617B7BA729F9629E72B2` |
+| Release tag | `desktop-v0.1.1-20260628` |
+| 发布页 | <https://github.com/iBigQiang/feedgrab/releases/tag/desktop-v0.1.1-20260628> |
+| 下载地址 | <https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.1-20260628/feedgrab-desktop-setup-0.1.1.exe> |
+| 本地构建目录 | `D:\AiCode\feedgrab\desktop\release-packages\20260628-130813\` |
+| 本地原始文件名 | `feedgrab Desktop Setup 0.1.1.exe` |
+| Release asset 文件名 | `feedgrab-desktop-setup-0.1.1.exe` |
+| 文件大小 | `376857361` bytes |
+| 打包时间 | `2026-06-28 13:09:03 +08:00` |
+| SHA256 | `92F661F9811283674EB69944A90B2E3ED792C8480AE71A287973B05FFFFC792D` |
 | 签名状态 | 未签名 |
 | 在线核验 | GitHub API `browser_download_url` 与上方下载地址一致，`curl.exe -I -L` 最终返回 `200 OK` |
 
 发布 Release 时必须指定 `--target feedgrab-desktop`，避免 tag 指向 `main`。
 发布文档更新后，`feedgrab-desktop` 分支根目录 `README.md` 必须与 `desktop/README.md` 保持全文一致，确保 GitHub 打开桌面分支时默认展示客户端说明。
+每次重新发布安装包前必须递增 `desktop/package.json` 小版本号，例如 `0.1.1`、`0.1.2`，不要复用旧版本号生成新安装包。
 
 两个版本都会先构建 `feedgrab-runtime`，包含：
 
