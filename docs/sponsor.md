@@ -1,6 +1,6 @@
 ## ❤️ 赞助商 
 
-> [想出现在这里？](mailto:ibigqiang@gmail.com)
+> [想出现在这里？](mailto:ibigqiang@gmail.com) 🗨️WeChat：88667178 或 📧ibigqiang@gmail.com 联系。
 
 <table>
 <tr>
