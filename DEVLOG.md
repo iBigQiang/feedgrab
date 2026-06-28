@@ -2,6 +2,37 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-06-28 · v0.26.3-dev · 桌面端 0.1.2 安装包收尾发布
+
+### 背景
+
+`feedgrab-desktop` 分支完成安装目录数据保留、Obsidian Vault 输出优先级、X/Twitter GraphQL 优先调度和 Markdown 标题/front matter 回归修复后，按桌面端专用收尾流程重新发布安装包。主分支 `main` 本轮不改动。
+
+### 实施
+
+- 桌面端安装包版本从 `0.1.1` 递增到 `0.1.2`，避免多个安装包复用同一版本号。
+- 重新执行 `desktop` 下的 `npm run pack:user`，生成普通用户 NSIS 安装器。
+- GitHub Release tag 使用 `desktop-v0.1.2-20260628`，asset 使用无空格文件名 `feedgrab-desktop-setup-0.1.2.exe`。
+- `desktop/README.md`、根目录 `README.md`、`README_en.md`、`docs/feedgrab-desktop-packaging.md` 和 `feedgrab-desktop-readme.md` 同步更新到 0.1.2 的真实下载地址、SHA256、文件大小和签名状态。
+- 修正赞助页内置 Markdown 测试断言，使测试跟随当前 `docs/sponsor.md` 的实际标题和链接。
+
+### 验证结果
+
+- `desktop`: `npm test`：65 passed。
+- `desktop`: `npm run lint`：通过。
+- `desktop`: `npm run build`：通过。
+- `python -m pytest tests/test_service_desktop.py tests/test_worker_protocol.py tests/test_service_layer.py -q -p no:cacheprovider`：60 passed。
+- `desktop`: `npm run pack:user`：成功生成 `D:\AiCode\feedgrab\desktop\release-packages\20260628-132707\feedgrab Desktop Setup 0.1.2.exe`。
+- 安装包大小：`376844911` bytes。
+- 安装包 SHA256：`A2D02AFEF94801300832A310E28153ED2E9B40C92AB271B42C5528EA1DD1934E`。
+- 安装包签名状态：未签名。
+- GitHub Release：`desktop-v0.1.2-20260628`，asset `feedgrab-desktop-setup-0.1.2.exe` 已上传。
+- 下载地址核验：GitHub API 返回的 `browser_download_url` 为 `https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.2-20260628/feedgrab-desktop-setup-0.1.2.exe`，`curl.exe -I -L` 最终返回 `200 OK`，`Content-Length: 376844911`。
+
+### 状态：已完成 ✅
+
+---
+
 ## 2026-06-27 · v0.26.2-dev · 桌面端安装包阶段性发布
 
 ### 背景

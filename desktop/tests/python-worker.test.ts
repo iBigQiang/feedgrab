@@ -6,6 +6,17 @@ import { describe, expect, it } from "vitest";
 
 import { createMockPythonWorkerClient, createPythonWorkerClient } from "../electron/python-worker";
 
+async function waitForCondition(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for expected worker event");
+}
+
 describe("createMockPythonWorkerClient", () => {
   it("returns deterministic diagnostics and mock output without touching real platforms", async () => {
     const worker = createMockPythonWorkerClient();
@@ -546,7 +557,9 @@ describe("createPythonWorkerClient protocol mapping", () => {
       urls: ["https://x.com/thinkszyg/status/2061278800491729292"],
       outputDirectory: "D:\\Notes\\Feeds"
     });
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await waitForCondition(() =>
+      events.some((event) => event.id === jobs[0]?.id && event.event === "error" && event.method === "fetch")
+    );
 
     expect(events).toEqual(
       expect.arrayContaining([
