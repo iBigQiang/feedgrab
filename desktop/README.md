@@ -4,8 +4,8 @@ feedgrab Desktop 是 feedgrab 的 Windows 图形客户端分支，面向不想�
 
 ## 下载入口
 
-- Windows 安装包直链：[feedgrab-desktop-setup-0.1.2.exe](https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.2-20260628/feedgrab-desktop-setup-0.1.2.exe)
-- 发布页：[desktop-v0.1.2-20260628](https://github.com/iBigQiang/feedgrab/releases/tag/desktop-v0.1.2-20260628)
+- Windows 安装包直链：[feedgrab-desktop-setup-0.1.13.exe](https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.13-20260701/feedgrab-desktop-setup-0.1.13.exe)
+- 发布页：[desktop-v0.1.13-20260701](https://github.com/iBigQiang/feedgrab/releases/tag/desktop-v0.1.13-20260701)
 - 当前桌面客户端分支：[feedgrab-desktop](https://github.com/iBigQiang/feedgrab/tree/feedgrab-desktop)
 - 分支源码压缩包：[feedgrab-desktop.zip](https://github.com/iBigQiang/feedgrab/archive/refs/heads/feedgrab-desktop.zip)
 
@@ -13,21 +13,21 @@ feedgrab Desktop 是 feedgrab 的 Windows 图形客户端分支，面向不想�
 
 | 文件 | 适合对象 | 说明 |
 | --- | --- | --- |
-| `feedgrab-desktop-setup-0.1.2.exe` | 普通用户 | 双击安装，自动创建开始菜单和桌面快捷方式。 |
+| `feedgrab-desktop-setup-0.1.13.exe` | 普通用户 | 双击安装，自动创建开始菜单和桌面快捷方式。 |
 
-本次安装包来自 `feedgrab-desktop` 分支，打包时间 / 构建时间 `2026-06-28 13:27`，签名状态：未签名。本地文件 SHA256：
+本次安装包来自 `feedgrab-desktop` 分支，打包时间 / 构建时间 `2026-07-01 16:41`，签名状态：未签名。本地文件 SHA256：
 
 ```text
-A2D02AFEF94801300832A310E28153ED2E9B40C92AB271B42C5528EA1DD1934E
+8E8B843B2F3D9820AA5F146CDF06CC3B8BDD040E33BDE68B1AB8A2A888E4747E
 ```
 
-上方下载地址来自 GitHub API 返回的 `browser_download_url`，已用 `curl.exe -I -L` 核验，最终返回 `200 OK`，文件大小 `376844911` bytes。
+上方下载地址来自 GitHub API 返回的 `browser_download_url`，已用 `curl.exe -I -L` 核验，最终返回 `200 OK`，文件大小 `376912943` bytes。
 
 开发者/便携版可在本地运行 `npm run pack:dev` 或 `npm run pack:all` 生成。后续每次重新打包正式安装包都会递增桌面端小版本号，避免多个安装包都显示同一个版本。
 
 ## 安装与启动
 
-1. 从 GitHub Releases 下载 `feedgrab-desktop-setup-0.1.2.exe`。
+1. 从 GitHub Releases 下载 `feedgrab-desktop-setup-0.1.13.exe`。
 2. 双击安装包，按提示选择安装目录。
 3. 安装完成后，通过桌面快捷方式或开始菜单启动 `feedgrab Desktop`。
 4. 首次启动后进入“诊断”页面，确认 Python、feedgrab 包、Playwright/Patchright、Chromium、Node.js、Electron、输出目录和登录态目录状态。
@@ -113,6 +113,7 @@ FEEDGRAB_DATA_DIR/
 - YouTube
 - Bilibili
 - GitHub
+- Reddit
 - Discourse 论坛
 - 文档平台：飞书、金山文档、FlowUs、有道云笔记等
 - 视频播客：YouTube、B站、小宇宙、喜马拉雅等
@@ -124,6 +125,29 @@ FEEDGRAB_DATA_DIR/
 - 任意网页
 
 不同平台对登录态、API Key、浏览器环境的要求不同。如果某个平台抓取失败，优先查看“登录”和“诊断”页面。
+
+## Reddit 支持
+
+Reddit 采用保守的多后端路线：direct `.json` + 已保存 Cookie 优先，随后尝试 Chrome CDP / Playwright session，最后保留 Jina 兜底。登录态不再只看 `reddit.json` 是否存在，诊断会用 `https://www.reddit.com/api/me.json` 做真实校验，避免游客 Cookie 被误判为已登录。
+
+常用命令：
+
+```powershell
+feedgrab doctor reddit
+feedgrab login reddit
+feedgrab reddit-so "codex" --sort comments --time all --limit 50
+feedgrab reddit-sub ChatGPT --sort hot --limit 50
+```
+
+`feedgrab login reddit` 会优先复用或启动普通 Chrome/CDP 手动登录；Reddit 不支持 `--headless` 自动化登录，以降低“异常登录/非法登录”拦截风险。
+
+关键配置：
+
+- `REDDIT_REPLY_MODE=top|tree|all`：默认 `top`，只渲染顶层评论；`tree` 保留初始响应里的嵌套回复；`all` 会额外调用 `/api/morechildren` 展开更多评论。
+- `REDDIT_MAX_PAGES=5`：`reddit-so` / `reddit-sub` 使用 `after` cursor 的最大分页数。
+- `REDDIT_RETRY_ATTEMPTS=3`：direct `.json` 遇到 `429 Retry-After`、5xx 或网络错误时的重试次数。
+- `REDDIT_MORECHILDREN_ROUNDS=2`：仅 `all` 模式生效，限制 `/api/morechildren` 展开轮数。
+- `REDDIT_MAX_COMMENTS=50`：单帖最多渲染的评论条数。
 
 ## 开发环境启动
 

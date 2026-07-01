@@ -2,6 +2,42 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-07-01 · v0.26.4-dev · 桌面端 0.1.13 阶段性收尾发布
+
+### 背景
+
+`feedgrab-desktop` 分支完成一轮客户端登录、多账号、卸载保留数据、Reddit 接入和社群页 Markdown 渲染修复后，按桌面端专用收尾流程发布新的 Windows 预览安装包。主分支 `main` 本轮不改动。
+
+### 实施
+
+- 桌面端安装包版本递增到 `0.1.13`，重新生成普通用户 NSIS 安装器。
+- 修复卸载器保留 `output` / `sessions` 的跳转问题，并新增是否清理 `AppData\Roaming\feedgrab-desktop` 的独立提示。
+- 登录中心改为全局 `CHROME_CDP_LOGIN` 规则：勾选时从当前 Chrome 抽取登录态，不勾选时走隔离登录窗口并在平台成功态后保存 session。
+- 多账号手动登录使用隔离浏览器 profile，避免第二个账号复用第一个账号的窗口状态。
+- 优化微信公众号、小红书、FlowUs、飞书、Reddit 等平台登录保存逻辑，降低半成品 cookie 被误保存的概率。
+- 移除手动登录窗口里的 `--disable-blink-features=AutomationControlled` 启动参数，减少 Chrome 不受支持命令行标记提示。
+- 新增 Reddit 桌面端阶段性支持：登录态检测、空白 session 模板、单帖抓取、关键词搜索、service/worker/GUI 链路和回归测试。
+- 修复桌面端关闭按钮行为，支持托盘最小化/退出选择。
+- 修复社群页 Markdown 表格渲染，使段落换行、加粗和表格单元格垂直对齐更接近 GitHub 预览。
+- GitHub Release notes 改为中文完整说明，写入版本重点、下载信息、SHA256、签名状态和验证结果。
+
+### 验证结果
+
+- `desktop`: `npm test`：82 passed。
+- `desktop`: `npm run lint`：通过。
+- `desktop`: `npm run build`：通过。
+- `python -m pytest tests/test_service_desktop.py tests/test_worker_protocol.py tests/test_service_layer.py -q -p no:cacheprovider`：104 passed。
+- `desktop`: `npm run pack:user`：成功生成 `D:\AiCode\feedgrab\desktop\release-packages\20260701-164041\feedgrab Desktop Setup 0.1.13.exe`。
+- 安装包大小：`376912943` bytes。
+- 安装包 SHA256：`8E8B843B2F3D9820AA5F146CDF06CC3B8BDD040E33BDE68B1AB8A2A888E4747E`。
+- 安装包签名状态：未签名。
+- GitHub Release：`desktop-v0.1.13-20260701`，asset `feedgrab-desktop-setup-0.1.13.exe` 已上传。
+- 下载地址核验：GitHub API 返回的 `browser_download_url` 为 `https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.13-20260701/feedgrab-desktop-setup-0.1.13.exe`，`curl.exe -I -L` 最终返回 `200 OK`，`Content-Length: 376912943`。
+
+### 状态：已完成 ✅
+
+---
+
 ## 2026-06-28 · v0.26.3-dev · 桌面端 0.1.2 安装包收尾发布
 
 ### 背景
