@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from feedgrab.schema import SourceType, UnifiedContent
 
 
@@ -46,6 +48,57 @@ def test_fetch_urls_returns_success_and_failure_items_without_skipping():
     assert results[1].content is None
     assert results[1].error["code"] == "fetch_error"
     assert results[1].to_dict()["request"]["url"].endswith("bad?token=%5Bredacted%5D")
+
+
+def test_login_status_rejects_weak_wechat_qq_cookies(tmp_path):
+    from feedgrab.service.login import LoginService
+
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    (session_dir / "wechat.json").write_text(
+        json.dumps(
+            {
+                "cookies": [
+                    {"name": "uin", "value": "fake", "domain": ".qq.com", "expires": -1},
+                    {"name": "rewardsn", "value": "fake", "domain": ".qq.com", "expires": -1},
+                ],
+                "origins": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    status = LoginService(session_dir=session_dir).status("wechat").to_dict()
+
+    assert status["status"] == "warning"
+    assert status["valid_count"] == 0
+    assert status["accounts"][0]["status"] == "invalid"
+    assert "关键 Cookie" in status["accounts"][0]["message"]
+
+
+def test_login_status_accepts_wechat_mp_backend_cookie_pair(tmp_path):
+    from feedgrab.service.login import LoginService
+
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    (session_dir / "wechat.json").write_text(
+        json.dumps(
+            {
+                "cookies": [
+                    {"name": "slave_sid", "value": "secret", "domain": ".qq.com", "expires": -1},
+                    {"name": "data_bizuin", "value": "123", "domain": ".qq.com", "expires": -1},
+                ],
+                "origins": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    status = LoginService(session_dir=session_dir).status("wechat").to_dict()
+
+    assert status["status"] == "ok"
+    assert status["valid_count"] == 1
+    assert status["accounts"][0]["status"] == "valid"
 
 
 def test_service_redaction_handles_nested_lists_urls_headers_and_cdp_endpoints():
@@ -100,6 +153,30 @@ def test_settings_resolves_installed_sessions_dir_for_legacy_relative_saved_valu
     assert items["FEEDGRAB_DATA_DIR"] == str(install_sessions)
     assert items["session_dir"] == str(install_sessions)
     assert os.environ["FEEDGRAB_DATA_DIR"] == str(install_sessions)
+
+
+def test_login_cdp_switch_is_global_basic_setting_not_platform_specific():
+    from feedgrab.service.platform_settings import (
+        LOGIN_CAPABILITIES,
+        PLATFORM_SETTINGS_SCHEMA,
+    )
+
+    fields = PLATFORM_SETTINGS_SCHEMA.field_map()
+    assert "CHROME_CDP_LOGIN" in fields
+    field = fields["CHROME_CDP_LOGIN"]
+    assert field.value_type == "boolean"
+    assert field.default is False
+    assert field.platform == "core"
+    assert "Chrome CDP" in field.label
+
+    required_platforms = {
+        platform
+        for platform, capability in LOGIN_CAPABILITIES.items()
+        if capability.login_required and platform != "x"
+    }
+
+    for platform in sorted(required_platforms):
+        assert f"{platform.upper()}_LOGIN_CDP_ENABLED" not in fields
 
 
 def test_job_service_runs_serial_jobs_and_records_artifacts_errors_history_and_cancel():
@@ -318,6 +395,181 @@ def test_login_status_finds_x_and_twitter_session_candidates(tmp_path):
     assert x_payload["session_path"].endswith("x_2.json")
 
 
+def test_login_status_finds_reddit_session_candidate(tmp_path):
+    from feedgrab.service.login import LoginService
+
+    reddit_session = tmp_path / "reddit.json"
+    reddit_session.write_text(
+        '{"cookies":[{"name":"reddit_session","value":"secret"}],"origins":[]}',
+        encoding="utf-8",
+    )
+
+    payload = LoginService(session_dir=tmp_path).status("reddit").to_dict()
+
+    assert payload["platform"] == "reddit"
+    assert payload["has_session"] is True
+    assert payload["status"] == "ok"
+    assert payload["session_path"].endswith("reddit.json")
+    assert payload["account_count"] == 1
+    assert payload["valid_count"] == 1
+    assert "secret" not in repr(payload)
+
+
+def test_login_status_rejects_reddit_visitor_token_without_session(tmp_path):
+    from feedgrab.service.login import LoginService
+
+    reddit_session = tmp_path / "reddit.json"
+    reddit_session.write_text(
+        '{"cookies":[{"name":"token_v2","value":"visitor","domain":".reddit.com"}],"origins":[]}',
+        encoding="utf-8",
+    )
+
+    payload = LoginService(session_dir=tmp_path).status("reddit").to_dict()
+
+    assert payload["platform"] == "reddit"
+    assert payload["has_session"] is True
+    assert payload["status"] == "warning"
+    assert payload["account_count"] == 1
+    assert payload["valid_count"] == 0
+    assert payload["accounts"][0]["status"] == "invalid"
+
+
+def test_login_status_reddit_live_validation_uses_api_me(monkeypatch, tmp_path):
+    from feedgrab.service.login import LoginService
+
+    reddit_session = tmp_path / "reddit.json"
+    reddit_session.write_text(
+        '{"cookies":[{"name":"reddit_session","value":"secret","domain":".reddit.com"}],"origins":[]}',
+        encoding="utf-8",
+    )
+
+    def fake_validate(*, session_path=None, timeout=8):
+        assert str(session_path).endswith("reddit.json")
+        return {
+            "status": "ok",
+            "authenticated": True,
+            "username": "testuser",
+            "message": "Reddit session 可用",
+        }
+
+    monkeypatch.setattr("feedgrab.fetchers.reddit.validate_reddit_session", fake_validate)
+
+    payload = LoginService(session_dir=tmp_path).status("reddit", live=True).to_dict()
+
+    assert payload["status"] == "ok"
+    assert payload["validation_mode"] == "api_me"
+    assert payload["accounts"][0]["username"] == "testuser"
+    assert "secret" not in repr(payload)
+
+
+def test_login_service_login_projects_configured_session_dir(monkeypatch, tmp_path):
+    from feedgrab.service.login import LoginService
+
+    seen = {}
+
+    def fake_login(platform, headless=False):
+        seen["platform"] = platform
+        seen["headless"] = headless
+        seen["data_dir"] = os.environ.get("FEEDGRAB_DATA_DIR")
+
+    monkeypatch.setattr("feedgrab.service.login.login", fake_login)
+    monkeypatch.setenv("FEEDGRAB_DATA_DIR", str(tmp_path / "old-sessions"))
+
+    LoginService(session_dir=tmp_path / "desktop-sessions").login("reddit")
+
+    assert seen == {
+        "platform": "reddit",
+        "headless": False,
+        "data_dir": str(tmp_path / "desktop-sessions"),
+    }
+    assert os.environ["FEEDGRAB_DATA_DIR"] == str(tmp_path / "old-sessions")
+
+
+@pytest.mark.parametrize(
+    ("platform", "base_name", "expected_name", "cookie_name"),
+    [
+        ("twitter", "twitter.json", "twitter_2.json", "auth_token"),
+        ("xhs", "xhs.json", "xhs_2.json", "a1"),
+        ("wechat", "wechat.json", "wechat_2.json", "slave_sid"),
+        ("feishu", "feishu.json", "feishu_2.json", "session"),
+        ("kdocs", "kdocs.json", "kdocs_2.json", "wps_sid"),
+        ("flowus", "flowus.json", "flowus_2.json", "next_auth"),
+        ("zhihu", "zhihu.json", "zhihu_2.json", "z_c0"),
+        ("linuxdo", "linuxdo.json", "linuxdo_2.json", "_forum_session"),
+        ("idcflare", "idcflare.json", "idcflare_2.json", "_forum_session"),
+        ("zsxq", "zsxq.json", "zsxq_2.json", "zsxq_access_token"),
+        ("reddit", "reddit.json", "reddit_2.json", "reddit_session"),
+    ],
+)
+def test_login_service_login_uses_next_numbered_session_path(
+    monkeypatch,
+    tmp_path,
+    platform,
+    base_name,
+    expected_name,
+    cookie_name,
+):
+    from feedgrab.service.login import LoginService
+
+    session_dir = tmp_path / "desktop-sessions"
+    session_dir.mkdir()
+    (session_dir / base_name).write_text(
+        json.dumps({"cookies": [{"name": cookie_name, "value": "secret"}], "origins": []}),
+        encoding="utf-8",
+    )
+
+    seen = {}
+
+    def fake_login(platform, headless=False):
+        seen["platform"] = platform
+        seen["session_path"] = os.environ.get("FEEDGRAB_LOGIN_SESSION_PATH")
+
+    monkeypatch.setattr("feedgrab.service.login.login", fake_login)
+
+    LoginService(session_dir=session_dir).login(platform)
+
+    assert seen == {
+        "platform": platform,
+        "session_path": str(session_dir / expected_name),
+    }
+
+
+def test_login_service_login_can_replace_empty_template_session(monkeypatch, tmp_path):
+    from feedgrab.service.login import LoginService
+
+    session_dir = tmp_path / "desktop-sessions"
+    session_dir.mkdir()
+    (session_dir / "reddit.json").write_text('{"cookies":[],"origins":[]}', encoding="utf-8")
+
+    seen = {}
+
+    def fake_login(platform, headless=False):
+        seen["session_path"] = os.environ.get("FEEDGRAB_LOGIN_SESSION_PATH")
+
+    monkeypatch.setattr("feedgrab.service.login.login", fake_login)
+
+    LoginService(session_dir=session_dir).login("reddit")
+
+    assert seen["session_path"] == str(session_dir / "reddit.json")
+
+
+def test_login_service_status_rejects_xhs_visitor_cookie_without_web_session(tmp_path):
+    from feedgrab.service.login import LoginService
+
+    session_dir = tmp_path / "desktop-sessions"
+    session_dir.mkdir()
+    (session_dir / "xhs.json").write_text(
+        json.dumps({"cookies": [{"name": "a1", "value": "device-cookie"}], "origins": []}),
+        encoding="utf-8",
+    )
+
+    payload = LoginService(session_dir=session_dir).status("xhs").to_dict()
+
+    assert payload["status"] == "warning"
+    assert payload["valid_count"] == 0
+    assert payload["accounts"][0]["status"] == "invalid"
+
+
 def test_login_service_imports_installer_sessions_without_overwriting_existing(tmp_path):
     from feedgrab.service.login import LoginService
 
@@ -379,7 +631,7 @@ def test_login_service_sync_import_disables_target_sessions_missing_from_source(
     installer_dir = tmp_path / "installer"
     target_dir.mkdir()
     installer_dir.mkdir()
-    valid_session = '{"cookies":[{"name":"ct0","value":"token"}],"origins":[]}'
+    valid_session = '{"cookies":[{"name":"auth_token","value":"token"},{"name":"ct0","value":"csrf"}],"origins":[]}'
     for file_name in ("x.json", "x_2.json", "x_3.json"):
         (target_dir / file_name).write_text(valid_session, encoding="utf-8")
     for file_name in ("x.json", "x_2.json"):
@@ -409,7 +661,7 @@ def test_login_service_ignores_blank_session_templates_without_disabling_existin
     template_dir = tmp_path / "templates"
     target_dir.mkdir()
     template_dir.mkdir()
-    valid_session = '{"cookies":[{"name":"ct0","value":"token"}],"origins":[]}'
+    valid_session = '{"cookies":[{"name":"auth_token","value":"token"},{"name":"ct0","value":"csrf"}],"origins":[]}'
     (target_dir / "x_2.json").write_text(valid_session, encoding="utf-8")
     (template_dir / "x_2.json").write_text('{"auth_token":"","ct0":""}', encoding="utf-8")
     (template_dir / "xhs.json").write_text('{"cookies":[],"origins":[]}', encoding="utf-8")
@@ -465,6 +717,10 @@ def test_settings_schema_update_persist_project_and_snapshot_redacts_secret(monk
 
     assert "FEISHU_APP_SECRET" in field_names
     assert "X_SEARCH_DAYS" in field_names
+    assert "REDDIT_ENABLED" in field_names
+    assert "REDDIT_MAX_COMMENTS" in field_names
+    assert "REDDIT_SEARCH_SORT" in field_names
+    assert "REDDIT_SEARCH_TIME_RANGE" in field_names
     assert core_fields["OBSIDIAN_VAULT"]["label"] == "Obsidian Vault"
     assert core_fields["OBSIDIAN_VAULT"]["description"] == "高优先级"
 
@@ -486,6 +742,35 @@ def test_settings_schema_update_persist_project_and_snapshot_redacts_secret(monk
     assert obsidian_vault["source"] == "unset"
     assert feishu_secret["value"] == "[redacted]"
     assert x_days["value"] == "7"
+
+
+def test_reddit_platform_settings_schema_includes_search_controls():
+    from feedgrab.service.platform_settings import PLATFORM_SETTINGS_SCHEMA
+
+    reddit_group = next(group for group in PLATFORM_SETTINGS_SCHEMA.platforms if group.id == "reddit")
+    fields = {field.name: field for field in reddit_group.fields}
+
+    assert fields["REDDIT_SEARCH_ENABLED"].value_type == "boolean"
+    assert fields["REDDIT_SEARCH_SORT"].value_type == "select"
+    assert [option["value"] for option in fields["REDDIT_SEARCH_SORT"].options] == [
+        "relevance",
+        "hot",
+        "top",
+        "new",
+        "comments",
+    ]
+    assert fields["REDDIT_SEARCH_TIME_RANGE"].value_type == "select"
+    assert [option["value"] for option in fields["REDDIT_SEARCH_TIME_RANGE"].options] == [
+        "all",
+        "year",
+        "month",
+        "week",
+        "day",
+        "hour",
+    ]
+    assert fields["REDDIT_SEARCH_LIMIT"].default == 10
+    assert fields["REDDIT_SEARCH_SAVE_POSTS"].value_type == "boolean"
+    assert fields["REDDIT_SEARCH_SUBREDDIT"].value_type == "string"
 
 
 def test_desktop_settings_migrates_legacy_default_output_and_vault(monkeypatch, tmp_path):

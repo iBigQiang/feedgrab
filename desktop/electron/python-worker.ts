@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import nodePath from "node:path";
 
 import type {
   DoctorCheck,
@@ -59,6 +60,7 @@ const platformMatchers: Array<[SupportedPlatform, RegExp]> = [
   ["bilibili", /bilibili\.com|b23\.tv/i],
   ["wechat", /mp\.weixin\.qq\.com/i],
   ["github", /github\.com/i],
+  ["reddit", /(?:^|\.)reddit\.com|(?:^|\.)redd\.it/i],
   ["linuxdo", /linux\.do/i],
   ["idcflare", /idcflare\.com/i],
   ["feishu", /feishu\.cn|larksuite\.com|larkoffice\.com/i],
@@ -75,6 +77,7 @@ const loginPlatforms: SupportedPlatform[] = [
   "feishu",
   "kdocs",
   "flowus",
+  "reddit",
   "zhihu",
   "linuxdo",
   "idcflare",
@@ -117,6 +120,7 @@ function platformFolder(platform: SupportedPlatform): string {
     bilibili: "Bilibili",
     wechat: "mpweixin",
     github: "GitHub",
+    reddit: "Reddit",
     linuxdo: "LinuxDo",
     idcflare: "IDCFlare",
     feishu: "Feishu",
@@ -309,7 +313,8 @@ export function createMockPythonWorkerClient(): PythonWorkerClient {
             value: "",
             description: "Markdown 和附件的默认输出目录"
           },
-          { name: "DOWNLOAD_IMAGES", label: "下载图片", type: "boolean", value: true }
+          { name: "DOWNLOAD_IMAGES", label: "下载图片", type: "boolean", value: true },
+          { name: "CHROME_CDP_LOGIN", label: "登录时优先从 Chrome CDP 提取登录态", type: "boolean", value: false }
         ],
         platforms: [
           {
@@ -319,6 +324,16 @@ export function createMockPythonWorkerClient(): PythonWorkerClient {
               { name: "X_SEARCH_DAYS", label: "搜索天数", type: "number", value: 7 },
               { name: "TWITTERAPI_IO_KEY", label: "TwitterAPI.io Key", type: "secret", value: "[redacted]", secret: true }
             ]
+          },
+          {
+            id: "xhs",
+            label: "小红书",
+            fields: []
+          },
+          {
+            id: "wechat",
+            label: "微信公众号",
+            fields: []
           },
           {
             id: "feishu",
@@ -345,6 +360,46 @@ export function createMockPythonWorkerClient(): PythonWorkerClient {
                   { label: "仅主贴", value: "none" }
                 ]
               }
+            ]
+          },
+          { id: "zsxq", label: "知识星球", fields: [] },
+          {
+            id: "reddit",
+            label: "Reddit",
+            fields: [
+              { name: "REDDIT_ENABLED", label: "启用 Reddit 抓取", type: "boolean", value: true },
+              { name: "REDDIT_MAX_COMMENTS", label: "评论最大条数", type: "number", value: 50 },
+              { name: "REDDIT_CDP_ENABLED", label: "Reddit 复用 Chrome CDP", type: "boolean", value: true },
+              {
+                name: "REDDIT_SEARCH_SORT",
+                label: "帖子搜索排序",
+                type: "select",
+                value: "relevance",
+                options: [
+                  { label: "相关性 relevance", value: "relevance" },
+                  { label: "热门 hot", value: "hot" },
+                  { label: "最受欢迎 top", value: "top" },
+                  { label: "新 new", value: "new" },
+                  { label: "评论计数 comments", value: "comments" }
+                ]
+              },
+              {
+                name: "REDDIT_SEARCH_TIME_RANGE",
+                label: "帖子搜索时间范围",
+                type: "select",
+                value: "all",
+                options: [
+                  { label: "所有时间 all", value: "all" },
+                  { label: "去年 year", value: "year" },
+                  { label: "上个月 month", value: "month" },
+                  { label: "上周 week", value: "week" },
+                  { label: "今天 day", value: "day" },
+                  { label: "过去 1 小时 hour", value: "hour" }
+                ]
+              },
+              { name: "REDDIT_SEARCH_LIMIT", label: "帖子搜索结果数", type: "number", value: 10 },
+              { name: "REDDIT_SEARCH_SAVE_POSTS", label: "搜索后深抓单贴", type: "boolean", value: false },
+              { name: "REDDIT_SEARCH_SUBREDDIT", label: "限定子版块", type: "string", value: "" }
             ]
           },
           {
@@ -383,6 +438,7 @@ export function createMockPythonWorkerClient(): PythonWorkerClient {
         { platform: "feishu", label: "飞书", status: "missing", lastChecked: now },
         { platform: "kdocs", label: "金山文档", status: "missing", lastChecked: now },
         { platform: "flowus", label: "FlowUs", status: "missing", lastChecked: now },
+        { platform: "reddit", label: "Reddit", status: "missing", lastChecked: now },
         { platform: "zhihu", label: "知乎", status: "missing", lastChecked: now },
         { platform: "linuxdo", label: "LinuxDo", status: "connected", lastChecked: now },
         { platform: "idcflare", label: "IDCFlare", status: "missing", lastChecked: now },
@@ -397,7 +453,7 @@ export function createMockPythonWorkerClient(): PythonWorkerClient {
     },
     importLoginSessions(sourceDirectory, platform) {
       const sourceRoot = sourceDirectory || "D:\\AiCode\\feedgrab\\desktop\\sessions";
-      const candidates = platform ? [platform] : ["twitter", "xhs", "wechat", "linuxdo"];
+      const candidates = platform ? [platform] : ["twitter", "xhs", "wechat", "linuxdo", "reddit"];
       return Promise.resolve({
         ok: true,
         sourceDirectory: sourceRoot,
@@ -500,6 +556,7 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
           targets,
           platform,
           mode: request.mode,
+          options: request.options,
           command_preview: request.commandPreview,
           output_dir: request.outputDirectory
         }
@@ -730,9 +787,10 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
   loginPlatform(platform: SupportedPlatform): Promise<LoginPlatformResult> {
     return new Promise((resolve) => {
       const args = this.loginArgs(platform);
+      const env = this.loginEnvironment(platform);
       const child = spawn(this.command, args, {
         cwd: this.cwd,
-        env: this.loginEnvironment(),
+        env,
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true
       });
@@ -751,12 +809,28 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
       });
       child.on("exit", (code) => {
         const message = [...chunks, ...errors].join("").trim();
+        if (code !== 0) {
+          resolve({
+            ok: false,
+            platform,
+            status: "expired",
+            message: message || `${platformLabel(platform)} 登录失败`,
+            error: message || `登录进程退出，退出码 ${code ?? "未知"}`
+          });
+          return;
+        }
+
+        const check = inspectLoginSessionFile(env.FEEDGRAB_LOGIN_SESSION_PATH, platform);
         resolve({
-          ok: code === 0,
+          ok: check.valid,
           platform,
-          status: code === 0 ? "connected" : "expired",
-          message: message || (code === 0 ? `${platformLabel(platform)} 登录完成` : `${platformLabel(platform)} 登录失败`),
-          error: code === 0 ? undefined : message || `登录进程退出，退出码 ${code ?? "未知"}`
+          status: check.status,
+          message: check.valid
+            ? message || `${platformLabel(platform)} 登录完成`
+            : message || `${platformLabel(platform)} 登录流程结束，但未检测到有效登录态：${check.message}`,
+          error: check.valid
+            ? undefined
+            : message || `${platformLabel(platform)} 登录流程结束，但未检测到有效登录态：${check.message}`
         });
       });
     });
@@ -1022,13 +1096,27 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
     return ["login", platform];
   }
 
-  private loginEnvironment(): NodeJS.ProcessEnv {
+  private loginEnvironment(platform?: SupportedPlatform): NodeJS.ProcessEnv {
     const baseEnv = this.runtimeEnvironment();
-    return {
+    const env: NodeJS.ProcessEnv = {
       ...baseEnv,
       ...readSavedSettingsEnvironment(baseEnv.FEEDGRAB_SETTINGS_PATH, baseEnv),
       PYTHONIOENCODING: "utf-8"
     };
+    if (platform) {
+      const loginCdpEnabled = globalLoginCdpEnabled(env);
+      env.CHROME_CDP_LOGIN = loginCdpEnabled ? "true" : "false";
+      if (loginCdpEnabled) {
+        delete env.FEEDGRAB_FORCE_INTERACTIVE_LOGIN;
+      } else {
+        env.FEEDGRAB_FORCE_INTERACTIVE_LOGIN = "true";
+      }
+      const sessionPath = nextLoginSessionPath(platform, env);
+      if (sessionPath) {
+        env.FEEDGRAB_LOGIN_SESSION_PATH = sessionPath;
+      }
+    }
+    return env;
   }
 
   private runtimeEnvironment(): NodeJS.ProcessEnv {
@@ -1218,6 +1306,7 @@ function isSupportedPlatform(value: unknown): value is SupportedPlatform {
       "bilibili",
       "wechat",
       "github",
+      "reddit",
       "linuxdo",
       "idcflare",
       "feishu",
@@ -1384,7 +1473,8 @@ function defaultSettingsSchema(env: NodeJS.ProcessEnv = process.env): SettingsSc
         type: "path",
         value: env.FEEDGRAB_DATA_DIR || env.FEEDGRAB_INSTALL_SESSIONS_DIR || ""
       },
-      { name: "BROWSER_USER_AGENT", label: "浏览器 User-Agent", type: "string", value: env.BROWSER_USER_AGENT || defaultRuntimeUserAgent() }
+      { name: "BROWSER_USER_AGENT", label: "浏览器 User-Agent", type: "string", value: env.BROWSER_USER_AGENT || defaultRuntimeUserAgent() },
+      { name: "CHROME_CDP_LOGIN", label: "登录时优先从 Chrome CDP 提取登录态", type: "boolean", value: envBool(env.CHROME_CDP_LOGIN) }
     ],
     platforms: [
       {
@@ -1396,9 +1486,70 @@ function defaultSettingsSchema(env: NodeJS.ProcessEnv = process.env): SettingsSc
         ]
       },
       {
+        id: "xhs",
+        label: "小红书",
+        fields: []
+      },
+      {
+        id: "wechat",
+        label: "微信公众号",
+        fields: []
+      },
+      {
         id: "feishu",
         label: "文档平台",
-        fields: [{ name: "FEISHU_APP_SECRET", label: "飞书 App Secret", type: "secret", value: "[redacted]", secret: true }]
+        fields: [
+          { name: "FEISHU_APP_SECRET", label: "飞书 App Secret", type: "secret", value: "[redacted]", secret: true },
+        ]
+      },
+      {
+        id: "discourse",
+        label: "Discourse论坛",
+        fields: []
+      },
+      { id: "zsxq", label: "知识星球", fields: [] },
+      {
+        id: "reddit",
+        label: "Reddit",
+        fields: [
+          { name: "REDDIT_ENABLED", label: "启用 Reddit 抓取", type: "boolean", value: true },
+          { name: "REDDIT_MAX_COMMENTS", label: "评论最大条数", type: "number", value: 50 },
+          {
+            name: "REDDIT_SEARCH_SORT",
+            label: "帖子搜索排序",
+            type: "select",
+            value: "relevance",
+            options: [
+              { label: "相关性 relevance", value: "relevance" },
+              { label: "热门 hot", value: "hot" },
+              { label: "最受欢迎 top", value: "top" },
+              { label: "新 new", value: "new" },
+              { label: "评论计数 comments", value: "comments" }
+            ]
+          },
+          {
+            name: "REDDIT_SEARCH_TIME_RANGE",
+            label: "帖子搜索时间范围",
+            type: "select",
+            value: "all",
+            options: [
+              { label: "所有时间 all", value: "all" },
+              { label: "去年 year", value: "year" },
+              { label: "上个月 month", value: "month" },
+              { label: "上周 week", value: "week" },
+              { label: "今天 day", value: "day" },
+              { label: "过去 1 小时 hour", value: "hour" }
+            ]
+          },
+          { name: "REDDIT_SEARCH_LIMIT", label: "帖子搜索结果数", type: "number", value: 10 },
+          { name: "REDDIT_SEARCH_SAVE_POSTS", label: "搜索后深抓单贴", type: "boolean", value: false },
+          { name: "REDDIT_SEARCH_SUBREDDIT", label: "限定子版块", type: "string", value: "" }
+        ]
+      },
+      {
+        id: "zhihu",
+        label: "知乎",
+        fields: []
       }
     ]
   };
@@ -1431,6 +1582,105 @@ function normalizeLoginStatus(value: unknown): LoginStatus["status"] {
   return "expired";
 }
 
+function inspectLoginSessionFile(sessionPath: unknown, platform: SupportedPlatform): {
+  valid: boolean;
+  status: LoginStatus["status"];
+  message: string;
+} {
+  if (typeof sessionPath !== "string" || sessionPath.trim().length === 0) {
+    return { valid: false, status: "missing", message: "登录流程未返回 session 文件路径" };
+  }
+  if (!existsSync(sessionPath)) {
+    return { valid: false, status: "missing", message: `未生成 session 文件：${sessionPath}` };
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(readFileSync(sessionPath, "utf8"));
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error || "未知错误");
+    return { valid: false, status: "expired", message: `session 文件不是有效 JSON：${detail}` };
+  }
+
+  const cookies = extractSessionCookies(payload).filter((cookie) => !cookieExpired(cookie));
+  if (cookies.length === 0) {
+    return { valid: false, status: "expired", message: "session 文件里没有未过期 Cookie" };
+  }
+  if (!sessionCookiesSufficientForLogin(platform, cookies)) {
+    return { valid: false, status: "expired", message: "session 文件缺少关键登录 Cookie" };
+  }
+  return { valid: true, status: "connected", message: "session 文件结构有效" };
+}
+
+function extractSessionCookies(payload: unknown): Array<Record<string, unknown>> {
+  const data = asRecord(payload);
+  if (Array.isArray(data.cookies)) {
+    return data.cookies.map(asRecord);
+  }
+  return Object.entries(data)
+    .filter(([, value]) => typeof value === "string" && value.length > 0)
+    .map(([name, value]) => ({ name, value }));
+}
+
+function cookieExpired(cookie: Record<string, unknown>): boolean {
+  const expires = cookie.expires;
+  if (typeof expires !== "number") {
+    return false;
+  }
+  if (expires <= 0) {
+    return false;
+  }
+  return expires <= Date.now() / 1000;
+}
+
+function sessionCookiesSufficientForLogin(platform: SupportedPlatform, cookies: Array<Record<string, unknown>>): boolean {
+  const canonical = canonicalLoginPlatform(platform);
+  const names = new Set(
+    cookies
+      .filter((cookie) => typeof cookie.value === "string" && cookie.value.trim().length > 0)
+      .map((cookie) => String(cookie.name ?? "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (canonical === "wechat") {
+    return wechatCookieNamesSufficient(names);
+  }
+  const requiredAll: Record<string, string[]> = {
+    twitter: ["auth_token", "ct0"],
+    xhs: ["web_session"],
+    flowus: ["next_auth", "next_auth.sig"]
+  };
+  const all = requiredAll[canonical];
+  if (all) {
+    return all.every((name) => names.has(name));
+  }
+  const requiredAny: Record<string, string[]> = {
+    feishu: ["session", "session_list", "passport_app_access_token"],
+    kdocs: ["wps_sid", "wps_sid_c"],
+    zhihu: ["z_c0"],
+    linuxdo: ["_t"],
+    idcflare: ["_t"],
+    zsxq: ["zsxq_access_token"],
+    reddit: ["reddit_session"]
+  };
+  const any = requiredAny[canonical];
+  if (any) {
+    return any.some((name) => names.has(name));
+  }
+  return cookies.length > 0;
+}
+
+function canonicalLoginPlatform(platform: SupportedPlatform): string {
+  return platform;
+}
+
+function wechatCookieNamesSufficient(names: Set<string>): boolean {
+  const mpBackend = ["slave_sid", "slave_user", "data_bizuin", "bizuin"].filter((name) => names.has(name));
+  if (mpBackend.length >= 2) {
+    return true;
+  }
+  return names.has("wxuin") && ["key", "pass_ticket", "appmsg_token"].some((name) => names.has(name));
+}
+
 function normalizeImportRows(value: unknown): LoginSessionImportResult["imported"] {
   if (!Array.isArray(value)) {
     return [];
@@ -1443,6 +1693,102 @@ function normalizeImportRows(value: unknown): LoginSessionImportResult["imported
       reason: typeof payload.reason === "string" ? payload.reason : undefined
     };
   });
+}
+
+function nextLoginSessionPath(platform: SupportedPlatform, env: NodeJS.ProcessEnv): string | undefined {
+  const sessionDir = env.FEEDGRAB_DATA_DIR || env.FEEDGRAB_INSTALL_SESSIONS_DIR || "";
+  if (!sessionDir) {
+    return undefined;
+  }
+
+  const prefixes = loginSessionPrefixes(platform);
+  for (const prefix of prefixes) {
+    const realFiles = matchingSessionFiles(sessionDir, prefix).filter((filePath) => !isEmptySessionTemplate(filePath));
+    if (realFiles.length > 0) {
+      return availableNumberedSessionPath(sessionDir, prefix);
+    }
+  }
+
+  const primaryPrefix = platform === "unknown" ? "unknown" : platform;
+  const basePath = nodePath.join(sessionDir, `${primaryPrefix}.json`);
+  if (!existsSync(basePath) || isEmptySessionTemplate(basePath)) {
+    return basePath;
+  }
+  return availableNumberedSessionPath(sessionDir, primaryPrefix);
+}
+
+function globalLoginCdpEnabled(env: NodeJS.ProcessEnv): boolean {
+  return envBool(env.CHROME_CDP_LOGIN);
+}
+
+function envBool(value: unknown): boolean {
+  const text = String(value ?? "").trim().toLowerCase();
+  return text === "true" || text === "1" || text === "yes" || text === "on";
+}
+
+function loginSessionPrefixes(platform: SupportedPlatform): string[] {
+  if (platform === "twitter") {
+    return ["x", "twitter"];
+  }
+  return [platform];
+}
+
+function matchingSessionFiles(sessionDir: string, prefix: string): string[] {
+  if (!existsSync(sessionDir)) {
+    return [];
+  }
+  const pattern = new RegExp(`^${escapeRegExp(prefix)}(?:_\\d+)?\\.json$`, "i");
+  return readdirSync(sessionDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && pattern.test(entry.name))
+    .map((entry) => nodePath.join(sessionDir, entry.name));
+}
+
+function availableNumberedSessionPath(sessionDir: string, prefix: string): string {
+  let index = 2;
+  while (true) {
+    const candidate = nodePath.join(sessionDir, `${prefix}_${index}.json`);
+    if (!existsSync(candidate) || isEmptySessionTemplate(candidate)) {
+      return candidate;
+    }
+    index += 1;
+  }
+}
+
+function isEmptySessionTemplate(filePath: string): boolean {
+  try {
+    const data = JSON.parse(readFileSync(filePath, "utf8")) as unknown;
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      return false;
+    }
+    const payload = data as Record<string, unknown>;
+    if (Array.isArray(payload.cookies) || Array.isArray(payload.origins)) {
+      return !hasTemplateValue(payload.cookies) && !hasTemplateValue(payload.origins);
+    }
+    const values = Object.values(payload);
+    if (values.length > 0 && values.every((value) => typeof value === "string")) {
+      return values.every((value) => String(value).trim() === "");
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function hasTemplateValue(value: unknown): boolean {
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => hasTemplateValue(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).some((item) => hasTemplateValue(item));
+  }
+  return value !== null && value !== undefined;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function readSavedSettingsEnvironment(
@@ -1526,6 +1872,7 @@ function platformLabel(platform: SupportedPlatform): string {
     bilibili: "Bilibili",
     wechat: "微信公众号",
     github: "GitHub",
+    reddit: "Reddit",
     linuxdo: "LinuxDo",
     idcflare: "IDCFlare",
     feishu: "飞书",

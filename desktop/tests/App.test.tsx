@@ -37,12 +37,18 @@ describe("App", () => {
     expect(screen.getByText("赞助")).toBeInTheDocument();
     expect(screen.getByText("社群")).toBeInTheDocument();
     expect(screen.queryByText("授权")).not.toBeInTheDocument();
+    expect(screen.getByText("版本号：v0.1.13")).toBeInTheDocument();
     expect(screen.getByText("强子手记").closest(".author-row")).toHaveTextContent("作者：强子手记");
     expect(screen.getByRole("link", { name: "@iBigQiang" })).toHaveAttribute("href", "https://x.com/iBigQiang");
     expect(screen.queryByText("商业化 GUI 客户端分支")).not.toBeInTheDocument();
     expect(screen.getByText("现已支持的平台：")).toBeInTheDocument();
     expect(screen.getByText("YouTube")).toBeInTheDocument();
+    expect(screen.getByText("Reddit")).toBeInTheDocument();
     expect(screen.getByText("知识星球")).toBeInTheDocument();
+    const platformButtons = within(screen.getByLabelText("平台识别结果")).getAllByRole("button");
+    const platformLabels = platformButtons.map((button) => button.textContent ?? "");
+    expect(platformLabels.indexOf("Reddit")).toBe(platformLabels.indexOf("知识星球") + 1);
+    expect(platformLabels.indexOf("小宇宙")).toBe(platformLabels.indexOf("Reddit") + 1);
     expect(
       Boolean(
         screen.getByLabelText("平台识别结果").compareDocumentPosition(screen.getByLabelText("抓取目标（URL / 关键词 / 关键词组 / 账号）")) &
@@ -128,6 +134,138 @@ describe("App", () => {
     );
   });
 
+  it("submits selected Reddit keywords as a structured search task with settings options", async () => {
+    const api = createTestApi({
+      settingsSchema: vi.fn().mockResolvedValue({
+        basic: [],
+        platforms: [
+          {
+            id: "reddit",
+            label: "Reddit",
+            fields: [
+              {
+                name: "REDDIT_SEARCH_SORT",
+                label: "帖子搜索排序",
+                type: "select",
+                value: "comments",
+                options: [
+                  { label: "相关性 relevance", value: "relevance" },
+                  { label: "评论计数 comments", value: "comments" }
+                ]
+              },
+              {
+                name: "REDDIT_SEARCH_TIME_RANGE",
+                label: "帖子搜索时间范围",
+                type: "select",
+                value: "all",
+                options: [
+                  { label: "所有时间 all", value: "all" },
+                  { label: "上周 week", value: "week" }
+                ]
+              },
+              { name: "REDDIT_SEARCH_LIMIT", label: "帖子搜索结果数", type: "number", value: 10 },
+              { name: "REDDIT_SEARCH_SAVE_POSTS", label: "搜索后深抓单贴", type: "boolean", value: false },
+              { name: "REDDIT_SEARCH_SUBREDDIT", label: "限定子版块", type: "string", value: "" }
+            ]
+          }
+        ]
+      }),
+      startFetch: vi.fn().mockResolvedValue([
+        {
+          id: "job-reddit-search",
+          url: "feedgrab reddit-so codex --sort comments --time all --limit 10",
+          platform: "reddit",
+          status: "running",
+          outputDirectory: INSTALL_OUTPUT_DIR,
+          createdAt: "2026-06-26T09:00:00.000Z"
+        }
+      ])
+    });
+    window.feedgrab = api;
+
+    render(<App />);
+    await screen.findByText(INSTALL_OUTPUT_DIR);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reddit" }));
+    fireEvent.change(screen.getByLabelText("抓取目标（URL / 关键词 / 关键词组 / 账号）"), {
+      target: { value: "codex" }
+    });
+
+    expect(await screen.findByText("将执行：feedgrab reddit-so codex --sort comments --time all --limit 10")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "开始抓取" }));
+
+    await waitFor(() =>
+      expect(api.startFetch).toHaveBeenCalledWith({
+        urls: [],
+        targets: ["codex"],
+        platform: "reddit",
+        mode: "search",
+        options: {
+          sort: "comments",
+          time: "all",
+          limit: 10
+        },
+        commandPreview: "feedgrab reddit-so codex --sort comments --time all --limit 10",
+        outputDirectory: INSTALL_OUTPUT_DIR
+      })
+    );
+  });
+
+  it("omits Reddit time range from hot and new search previews", async () => {
+    const api = createTestApi({
+      settingsSchema: vi.fn().mockResolvedValue({
+        basic: [],
+        platforms: [
+          {
+            id: "reddit",
+            label: "Reddit",
+            fields: [
+              {
+                name: "REDDIT_SEARCH_SORT",
+                label: "帖子搜索排序",
+                type: "select",
+                value: "hot",
+                options: [{ label: "热门 hot", value: "hot" }]
+              },
+              {
+                name: "REDDIT_SEARCH_TIME_RANGE",
+                label: "帖子搜索时间范围",
+                type: "select",
+                value: "week",
+                options: [{ label: "上周 week", value: "week" }]
+              },
+              { name: "REDDIT_SEARCH_LIMIT", label: "帖子搜索结果数", type: "number", value: 10 }
+            ]
+          }
+        ]
+      })
+    });
+    window.feedgrab = api;
+
+    render(<App />);
+    await screen.findByText(INSTALL_OUTPUT_DIR);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reddit" }));
+    fireEvent.change(screen.getByLabelText("抓取目标（URL / 关键词 / 关键词组 / 账号）"), {
+      target: { value: "codex" }
+    });
+
+    expect(await screen.findByText("将执行：feedgrab reddit-so codex --sort hot --limit 10")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "开始抓取" }));
+
+    await waitFor(() =>
+      expect(api.startFetch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          options: {
+            sort: "hot",
+            limit: 10
+          },
+          commandPreview: "feedgrab reddit-so codex --sort hot --limit 10"
+        })
+      )
+    );
+  });
+
   it("uses effective output directory on fetch page and in startFetch payload", async () => {
     const api = createTestApi({
       settingsSnapshot: vi.fn().mockResolvedValue({
@@ -172,6 +310,40 @@ describe("App", () => {
         outputDirectory: "D:\\Notes\\Vault"
       })
     );
+  });
+
+  it("blocks fetch until edited settings are saved", async () => {
+    const api = createTestApi({
+      settingsSchema: vi.fn().mockResolvedValue({
+        basic: [{ name: "FEEDGRAB_PROXY_ENABLED", label: "启用代理", type: "boolean", value: false }],
+        platforms: []
+      }),
+      startFetch: vi.fn().mockResolvedValue([
+        {
+          id: "job-unsaved",
+          url: "https://example.com/a",
+          platform: "web",
+          status: "running",
+          outputDirectory: INSTALL_OUTPUT_DIR,
+          createdAt: "2026-06-30T09:00:00.000Z"
+        }
+      ])
+    });
+    window.feedgrab = api;
+
+    render(<App />);
+    fireEvent.click(screen.getByText("设置"));
+    const proxyToggle = await screen.findByLabelText("启用代理");
+    fireEvent.click(proxyToggle);
+
+    fireEvent.click(screen.getByText("抓取"));
+    fireEvent.change(screen.getByLabelText("抓取目标（URL / 关键词 / 关键词组 / 账号）"), {
+      target: { value: "https://example.com/a" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "开始抓取" }));
+
+    expect(api.startFetch).not.toHaveBeenCalled();
+    expect(await screen.findByText("有未保存设置，请先保存设置后再开始抓取。")).toBeInTheDocument();
   });
 
   it("renders the sponsor page from bundled markdown and keeps author links in the sidebar", async () => {
@@ -349,7 +521,14 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: /feedgrab 用户交流群/ })).toBeInTheDocument();
     expect(screen.getByText(/添加作者微信/)).toBeInTheDocument();
     expect(screen.getByText(/88667178/)).toBeInTheDocument();
-    expect(screen.getByRole("table", { name: "社群信息" })).toBeInTheDocument();
+    const communityTable = screen.getByRole("table", { name: "社群信息" });
+    expect(communityTable).toBeInTheDocument();
+    const textCell = within(communityTable).getByText(/很高兴 feedgrab/).closest("td") as HTMLTableCellElement;
+    expect(within(textCell).queryByText("feedgrab 用户交流微信群")).not.toBeInTheDocument();
+    expect(textCell.querySelectorAll("p")).toHaveLength(2);
+    expect(within(textCell).getByText("88667178").tagName).toBe("STRONG");
+    expect(within(textCell).getByText("feedgrab").tagName).toBe("STRONG");
+    expect(within(textCell).getByText("抓取").tagName).toBe("STRONG");
   });
 
   it("loads online community markdown through the EdgeOne proxy and caches it", async () => {
@@ -363,7 +542,7 @@ describe("App", () => {
       "<table>",
       "<tr>",
       "<td width=\"200\"><a href=\"#\"><img src=\"https://edgeone.gh-proxy.com/https://raw.githubusercontent.com/iBigQiang/feedgrab/feedgrab-desktop/docs/vx_88667178.jpg\" alt=\"在线社群二维码\"></a></td>",
-      "<td>在线社群内容，添加微信 <strong>88667178</strong>。</td>",
+      "<td>在线社群内容，欢迎交流。<br><br>添加微信 <strong>88667178</strong>，备注：<strong>feedgrab</strong>。</td>",
       "</tr>",
       "</table>"
     ].join("\n");
@@ -377,6 +556,11 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "社群" }));
 
     expect(await screen.findByText(/在线社群内容/)).toBeInTheDocument();
+    const communityTable = screen.getByRole("table", { name: "社群信息" });
+    const textCell = within(communityTable).getByText(/在线社群内容/).closest("td") as HTMLTableCellElement;
+    expect(textCell.querySelectorAll("p")).toHaveLength(2);
+    expect(within(textCell).getByText("88667178").tagName).toBe("STRONG");
+    expect(within(textCell).getByText("feedgrab").tagName).toBe("STRONG");
     expect(fetchMock).toHaveBeenCalledWith(
       "https://edgeone.gh-proxy.com/https://raw.githubusercontent.com/iBigQiang/feedgrab/feedgrab-desktop/docs/group.md",
       { cache: "no-cache" }
@@ -796,6 +980,7 @@ describe("App", () => {
         { platform: "feishu", label: "飞书", status: "missing", lastChecked: now },
         { platform: "kdocs", label: "金山文档", status: "missing", lastChecked: now },
         { platform: "flowus", label: "FlowUs", status: "missing", lastChecked: now },
+        { platform: "reddit", label: "Reddit", status: "missing", lastChecked: now },
         { platform: "zhihu", label: "知乎", status: "missing", lastChecked: now },
         { platform: "linuxdo", label: "LinuxDo", status: "connected", lastChecked: now },
         { platform: "idcflare", label: "IDCFlare", status: "missing", lastChecked: now },
@@ -822,6 +1007,7 @@ describe("App", () => {
     expect(screen.getByText("飞书")).toBeInTheDocument();
     expect(screen.getByText("金山文档")).toBeInTheDocument();
     expect(screen.getByText("FlowUs")).toBeInTheDocument();
+    expect(screen.getByText("Reddit")).toBeInTheDocument();
     expect(screen.getByText("知乎")).toBeInTheDocument();
     expect(screen.getByText("IDCFlare")).toBeInTheDocument();
     expect(screen.getByText("知识星球")).toBeInTheDocument();
@@ -850,6 +1036,59 @@ describe("App", () => {
     fireEvent.click(row.getByRole("button", { name: "导入" }));
     expect(api.loginPlatform).toHaveBeenCalledWith("twitter");
     expect(api.importLoginSessions).toHaveBeenCalledWith(undefined, "twitter");
+  });
+
+  it("keeps Reddit login actions visible when the worker returns an older platform list", async () => {
+    const now = new Date("2026-06-25T09:00:00.000Z").toISOString();
+    const api = createTestApi({
+      loginStatus: vi
+        .fn()
+        .mockResolvedValueOnce([
+          { platform: "twitter", label: "X / Twitter", status: "connected", lastChecked: now },
+          { platform: "xhs", label: "小红书", status: "missing", lastChecked: now },
+          { platform: "wechat", label: "微信公众号", status: "connected", lastChecked: now }
+        ])
+        .mockResolvedValue([
+          {
+            platform: "reddit",
+            label: "Reddit",
+            status: "connected",
+            lastChecked: now,
+            accountCount: 1,
+            validCount: 1,
+            expiredCount: 0,
+            cookieCount: 4,
+            sessionPath: "D:\\AiCode\\feedgrab\\desktop\\sessions\\reddit.json"
+          }
+        ]),
+      loginPlatform: vi.fn().mockResolvedValue({ ok: true, platform: "reddit", message: "login started" }),
+      importLoginSessions: vi.fn().mockResolvedValue({
+        ok: true,
+        sourceDirectory: "D:\\AiCode\\feedgrab\\desktop\\sessions",
+        imported: [],
+        skipped: [{ source: "D:\\AiCode\\feedgrab\\desktop\\sessions\\reddit.json", reason: "exists" }],
+        disabled: [],
+        ignored: []
+      })
+    });
+    window.feedgrab = api;
+
+    render(<App />);
+    fireEvent.click(screen.getByText("登录"));
+
+    const redditRow = (await screen.findByText("Reddit")).closest("article");
+    expect(redditRow).not.toBeNull();
+    const row = within(redditRow as HTMLElement);
+    expect(row.getByText("等待检测")).toBeInTheDocument();
+
+    fireEvent.click(row.getByRole("button", { name: "检测" }));
+    await waitFor(() => expect(api.loginStatus).toHaveBeenCalledWith({ refresh: true, platforms: ["reddit"] }));
+    expect(await screen.findByText("1 个账号，本地有效 1 个，过期/异常 0 个")).toBeInTheDocument();
+
+    fireEvent.click(row.getByRole("button", { name: "登录" }));
+    fireEvent.click(row.getByRole("button", { name: "导入" }));
+    expect(api.loginPlatform).toHaveBeenCalledWith("reddit");
+    expect(api.importLoginSessions).toHaveBeenCalledWith(undefined, "reddit");
   });
 
   it("shows login action feedback as a temporary toast instead of stacked page rows", async () => {
@@ -893,7 +1132,7 @@ describe("App", () => {
           placeholder: "http://127.0.0.1:7890 或 socks5://127.0.0.1:7890"
         },
         { name: "FEEDGRAB_NO_PROXY", label: "不走代理地址", type: "string", value: "127.0.0.1,localhost" },
-        { name: "CHROME_CDP_LOGIN", label: "优先从 Chrome CDP 提取登录态", type: "boolean", value: false },
+        { name: "CHROME_CDP_LOGIN", label: "登录时优先从 Chrome CDP 提取登录态", type: "boolean", value: false },
         { name: "CHROME_CDP_PORT", label: "Chrome CDP 端口", type: "number", value: 9222 },
         { name: "FORCE_REFETCH", label: "强制重新抓取", type: "boolean", value: false }
       ],
@@ -924,6 +1163,39 @@ describe("App", () => {
                 { label: "全部楼层", value: "all" }
               ]
             }
+          ]
+        },
+        {
+          id: "zsxq",
+          label: "知识星球",
+          fields: []
+        },
+        {
+          id: "reddit",
+          label: "Reddit",
+          fields: [
+            { name: "REDDIT_ENABLED", label: "启用 Reddit 抓取", type: "boolean", value: true },
+            {
+              name: "REDDIT_SEARCH_SORT",
+              label: "帖子搜索排序",
+              type: "select",
+              value: "relevance",
+              options: [
+                { label: "相关性 relevance", value: "relevance" },
+                { label: "热门 hot", value: "hot" }
+              ]
+            },
+            {
+              name: "REDDIT_SEARCH_TIME_RANGE",
+              label: "帖子搜索时间范围",
+              type: "select",
+              value: "all",
+              options: [
+                { label: "所有时间 all", value: "all" },
+                { label: "上周 week", value: "week" }
+              ]
+            },
+            { name: "REDDIT_SEARCH_LIMIT", label: "帖子搜索结果数", type: "number", value: 10 }
           ]
         }
       ]
@@ -981,6 +1253,9 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("tab", { name: "平台设置" }));
     expect(screen.getByRole("tab", { name: "X / Twitter" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "文档平台" })).toBeInTheDocument();
+    const platformTabs = screen.getByRole("tablist", { name: "平台设置菜单" });
+    const platformTabLabels = within(platformTabs).getAllByRole("tab").map((tab) => tab.textContent ?? "");
+    expect(platformTabLabels.indexOf("Reddit")).toBe(platformTabLabels.indexOf("知识星球") + 1);
     expect(screen.queryByLabelText("飞书 Secret")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "关键词搜索" })).toBeInTheDocument();
 
@@ -990,6 +1265,11 @@ describe("App", () => {
     expect(screen.getByLabelText("飞书 Secret")).toHaveValue("[redacted]");
     fireEvent.click(screen.getByRole("tab", { name: "Discourse论坛" }));
     fireEvent.change(screen.getByLabelText("回复模式"), { target: { value: "all" } });
+    fireEvent.click(screen.getByRole("tab", { name: "Reddit" }));
+    expect(screen.getByRole("heading", { name: "单贴/评论抓取" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "帖子搜索" })).toBeInTheDocument();
+    expect(screen.getByLabelText("帖子搜索排序")).toHaveValue("relevance");
+    expect(screen.getByLabelText("帖子搜索时间范围")).toHaveValue("all");
     fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
 
     await waitFor(() =>
@@ -1134,11 +1414,11 @@ describe("App", () => {
     expect(checkbox).not.toBeChecked();
   });
 
-  it("does not start Chrome CDP just by opening settings or enabling the setting", async () => {
+  it("does not start Chrome CDP just by opening settings or enabling the global login CDP setting", async () => {
     const api = createTestApi({
       settingsSchema: vi.fn().mockResolvedValue({
         basic: [
-          { name: "CHROME_CDP_LOGIN", label: "优先从 Chrome CDP 提取登录态", type: "boolean", value: false },
+          { name: "CHROME_CDP_LOGIN", label: "登录时优先从 Chrome CDP 提取登录态", type: "boolean", value: false },
           { name: "CHROME_CDP_PORT", label: "Chrome CDP 端口", type: "number", value: 9222 },
           { name: "FORCE_REFETCH", label: "强制重新抓取", type: "boolean", value: false }
         ],
@@ -1155,7 +1435,7 @@ describe("App", () => {
 
     render(<App />);
     fireEvent.click(screen.getByText("设置"));
-    const checkbox = await screen.findByLabelText("优先从 Chrome CDP 提取登录态");
+    const checkbox = await screen.findByLabelText("登录时优先从 Chrome CDP 提取登录态");
 
     expect(api.ensureChromeCdp).not.toHaveBeenCalled();
     fireEvent.click(checkbox);
@@ -1175,6 +1455,7 @@ describe("App", () => {
     expect(screen.getByRole("tab", { name: "小红书" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "微信公众号" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Discourse论坛" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Reddit" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "文档平台" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "视频播客" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "知乎" })).toBeInTheDocument();
@@ -1186,6 +1467,10 @@ describe("App", () => {
     expect(screen.queryByRole("tab", { name: "小宇宙" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "喜马拉雅" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("启用 GraphQL 深度抓取")).toHaveAttribute("type", "checkbox");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Reddit" }));
+    expect(screen.getByLabelText("启用 Reddit 抓取")).toHaveAttribute("type", "checkbox");
+    expect(screen.getByLabelText("评论最大条数")).toHaveDisplayValue("50");
 
     fireEvent.click(screen.getByRole("tab", { name: "媒体 / API" }));
     expect(screen.getByRole("heading", { name: "Gemini" })).toBeInTheDocument();
@@ -1329,6 +1614,7 @@ function createTestApi(overrides: Partial<FeedgrabIpcApi> = {}): FeedgrabIpcApi 
     }),
     loginStatus: vi.fn().mockResolvedValue([
       { platform: "twitter", label: "X / Twitter", status: "missing", lastChecked: now },
+      { platform: "reddit", label: "Reddit", status: "missing", lastChecked: now },
       { platform: "github", label: "GitHub", status: "notRequired", lastChecked: now }
     ]),
     importLoginSessions: vi.fn().mockResolvedValue({ ok: true, imported: [], skipped: [], disabled: [], ignored: [] }),

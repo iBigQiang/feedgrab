@@ -683,6 +683,14 @@ def _format_markdown(item: UnifiedContent) -> str:
         fm_lines.append(f"is_self: {str(bool(extra.get('is_self', True))).lower()}")
         if extra.get("linked_url"):
             fm_lines.append(f'linked_url: "{extra["linked_url"]}"')
+        if extra.get("search_keyword"):
+            fm_lines.append(f'search_keyword: "{extra["search_keyword"]}"')
+        if extra.get("search_sort"):
+            fm_lines.append(f'search_sort: "{extra["search_sort"]}"')
+        if extra.get("search_time_range"):
+            fm_lines.append(f'search_time_range: "{extra["search_time_range"]}"')
+        if extra.get("result_type"):
+            fm_lines.append(f'result_type: "{extra["result_type"]}"')
 
     # Weibo extras
     is_weibo = item.source_type == SourceType.WEIBO

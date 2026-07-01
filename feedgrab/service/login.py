@@ -4,15 +4,17 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
+import contextlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from feedgrab.config import get_session_dir
-from feedgrab.login import login
+from feedgrab.login import _cookies_sufficient_for_login, login
 from feedgrab.service.models import redact_value
 from feedgrab.service.platform_settings import LOGIN_CAPABILITIES, get_login_capability
 
@@ -81,6 +83,21 @@ class SessionImportResult:
         }
 
 
+@contextlib.contextmanager
+def _temporary_environment(values: dict[str, str]):
+    previous = {name: os.environ.get(name) for name in values}
+    for name, value in values.items():
+        os.environ[name] = value
+    try:
+        yield
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
 class LoginService:
     """Run existing login flow and inspect session presence safely."""
 
@@ -88,9 +105,14 @@ class LoginService:
         self.session_dir = Path(session_dir) if session_dir is not None else get_session_dir()
 
     def login(self, platform: str, headless: bool = False) -> None:
-        login(platform, headless=headless)
+        session_path = self._next_login_session_path(platform)
+        with _temporary_environment({
+            "FEEDGRAB_DATA_DIR": str(self.session_dir),
+            "FEEDGRAB_LOGIN_SESSION_PATH": str(session_path),
+        }):
+            login(platform, headless=headless)
 
-    def status(self, platform: str) -> LoginStatus:
+    def status(self, platform: str, *, live: bool = False) -> LoginStatus:
         capability = get_login_capability(platform)
         candidate_paths = self._candidate_session_paths(platform)
         if not capability.login_required:
@@ -117,6 +139,10 @@ class LoginService:
             )
 
         accounts = [self._inspect_session_file(path, platform) for path in existing_paths]
+        validation_mode = "structural"
+        if live and platform.strip().lower() == "reddit":
+            validation_mode = "api_me"
+            self._validate_reddit_accounts(accounts)
         valid_count = sum(1 for account in accounts if account["status"] == "valid")
         unreadable_count = sum(1 for account in accounts if account["status"] == "unreadable")
         expired_count = len(accounts) - valid_count
@@ -137,6 +163,7 @@ class LoginService:
             valid_count=valid_count,
             expired_count=expired_count,
             unreadable_count=unreadable_count,
+            validation_mode=validation_mode,
             accounts=accounts,
             modified_at=modified_at,
             age_seconds=float(age_seconds) if isinstance(age_seconds, (int, float)) else None,
@@ -301,6 +328,39 @@ class LoginService:
                 ordered.append(path)
         return ordered or [self.session_dir / f"{platform}.json"]
 
+    def _next_login_session_path(self, platform: str) -> Path:
+        capability = get_login_capability(platform)
+        prefixes = capability.session_prefixes or (platform.strip().lower(),)
+        real_by_prefix: dict[str, list[Path]] = {}
+
+        if self.session_dir.exists():
+            for prefix in prefixes:
+                real_paths = [
+                    path
+                    for path in self._matching_session_files(prefix)
+                    if not self._is_empty_session_template(path)
+                ]
+                if real_paths:
+                    real_by_prefix[prefix] = real_paths
+
+        for prefix in prefixes:
+            if prefix in real_by_prefix:
+                return self._available_numbered_session_path(prefix, start=2)
+
+        prefix = capability.platform or platform.strip().lower()
+        base = self.session_dir / f"{prefix}.json"
+        if not base.exists() or self._is_empty_session_template(base):
+            return base
+        return self._available_numbered_session_path(prefix, start=2)
+
+    def _available_numbered_session_path(self, prefix: str, *, start: int = 2) -> Path:
+        index = max(2, start)
+        while True:
+            candidate = self.session_dir / f"{prefix}_{index}.json"
+            if not candidate.exists() or self._is_empty_session_template(candidate):
+                return candidate
+            index += 1
+
     def _matching_session_files(self, prefix: str) -> list[Path]:
         pattern = re.compile(rf"^{re.escape(prefix)}(?:_\d+)?\.json$", re.IGNORECASE)
         return [
@@ -403,12 +463,10 @@ class LoginService:
             account.update({"status": "expired", "message": "Cookie 已过期"})
             return account
 
-        required_names = self._required_cookie_names(platform)
-        if required_names:
-            cookie_names = {str(cookie.get("name", "")).lower() for cookie in valid_cookies}
-            if not cookie_names.intersection(required_names):
-                account.update({"status": "invalid", "message": "缺少关键 Cookie"})
-                return account
+        normalized_platform = self._canonical_login_platform(platform)
+        if not _cookies_sufficient_for_login(normalized_platform, valid_cookies):
+            account.update({"status": "invalid", "message": "缺少关键 Cookie"})
+            return account
 
         account.update({"status": "valid", "message": "本地结构有效"})
         return account
@@ -436,16 +494,43 @@ class LoginService:
         return expires <= datetime.now(timezone.utc).timestamp()
 
     @staticmethod
-    def _required_cookie_names(platform: str) -> set[str]:
+    def _canonical_login_platform(platform: str) -> str:
         normalized = platform.strip().lower()
-        if normalized in {"twitter", "x"}:
-            return {"auth_token", "ct0"}
-        if normalized == "xhs":
-            return {"web_session", "a1"}
-        if normalized == "wechat":
-            return {"wxuin", "uin", "key", "pass_ticket", "appmsg_token", "rewardsn"}
-        if normalized in {"linuxdo", "idcflare"}:
-            return {"_t", "_forum_session"}
-        if normalized == "zsxq":
-            return {"zsxq_access_token", "sajssdk_2015_cross_new_user"}
-        return set()
+        if normalized == "x":
+            return "twitter"
+        if normalized in {"xiaohongshu"}:
+            return "xhs"
+        if normalized == "lark":
+            return "feishu"
+        return normalized
+
+    @staticmethod
+    def _validate_reddit_accounts(accounts: list[dict[str, Any]]) -> None:
+        try:
+            from feedgrab.fetchers.reddit import validate_reddit_session
+        except Exception as exc:
+            for account in accounts:
+                if account.get("status") == "valid":
+                    account.update({
+                        "status": "invalid",
+                        "validation_mode": "api_me",
+                        "message": f"Reddit live 校验不可用: {exc}",
+                    })
+            return
+
+        for account in accounts:
+            if account.get("status") != "valid":
+                account["validation_mode"] = "api_me"
+                continue
+            result = validate_reddit_session(session_path=Path(str(account.get("session_path") or "")))
+            account["validation_mode"] = "api_me"
+            account["live_status"] = result.get("status", "")
+            account["authenticated"] = bool(result.get("authenticated", False))
+            if result.get("username"):
+                account["username"] = result["username"]
+            if result.get("http_status"):
+                account["http_status"] = result["http_status"]
+            if result.get("authenticated") and result.get("status") == "ok":
+                account.update({"status": "valid", "message": result.get("message", "Reddit session 可用")})
+            else:
+                account.update({"status": "invalid", "message": result.get("message", "Reddit session 不可用")})

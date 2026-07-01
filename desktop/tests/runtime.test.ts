@@ -64,6 +64,26 @@ describe("resolveFeedgrabRuntime", () => {
     expect(runtime.env.FEEDGRAB_INSTALL_SESSIONS_DIR).toBe(
       path.join("D:\\AiCode\\feedgrab", "desktop", "sessions")
     );
+    expect(runtime.env.FEEDGRAB_DATA_DIR).toBe(path.join("D:\\AiCode\\feedgrab", "desktop", "sessions"));
+  });
+
+  it("uses the desktop sessions directory as the system Python default data dir", () => {
+    const runtime = resolveFeedgrabRuntime({
+      platform: "win32",
+      projectRoot: "D:\\AiCode\\feedgrab",
+      resourcesPath: "C:\\Program Files\\feedgrab Desktop\\resources",
+      userDataPath: "C:\\Users\\Qiang\\AppData\\Roaming\\feedgrab Desktop",
+      env: {
+        FEEDGRAB_DATA_DIR: "D:\\AiCode\\feedgrab\\sessions"
+      },
+      exists: () => false
+    });
+
+    expect(runtime.source).toBe("system-python");
+    expect(runtime.env.FEEDGRAB_INSTALL_SESSIONS_DIR).toBe(
+      path.join("D:\\AiCode\\feedgrab", "desktop", "sessions")
+    );
+    expect(runtime.env.FEEDGRAB_DATA_DIR).toBe(path.join("D:\\AiCode\\feedgrab", "desktop", "sessions"));
   });
 
   it("keeps a user-provided browser user agent ahead of the runtime default", () => {

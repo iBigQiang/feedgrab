@@ -216,16 +216,26 @@ async def _connect_flowus_cdp(url: str) -> Optional[tuple]:
                     if c.get("domain", "").endswith("flowus.cn")
                     or c.get("domain", "") == "flowus.cn"
                 ]
-                session_path = get_session_dir() / "flowus.json"
-                session_path.parent.mkdir(parents=True, exist_ok=True)
-                storage = {"cookies": flowus_cookies, "origins": []}
-                session_path.write_text(
-                    json.dumps(storage, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
+                has_auth = (
+                    any(c.get("name") == "next_auth" for c in flowus_cookies)
+                    and any(c.get("name") == "next_auth.sig" for c in flowus_cookies)
                 )
-                logger.info(
-                    f"[flowus] CDP: saved {len(flowus_cookies)} cookies → {session_path}"
-                )
+                if has_auth:
+                    session_path = get_session_dir() / "flowus.json"
+                    session_path.parent.mkdir(parents=True, exist_ok=True)
+                    storage = {"cookies": flowus_cookies, "origins": []}
+                    session_path.write_text(
+                        json.dumps(storage, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    logger.info(
+                        f"[flowus] CDP: saved {len(flowus_cookies)} cookies → {session_path}"
+                    )
+                else:
+                    logger.debug(
+                        f"[flowus] CDP: skipping cookie save — auth cookies incomplete "
+                        f"(got {len(flowus_cookies)} cookies, need both next_auth + next_auth.sig)"
+                    )
             except Exception as e:
                 logger.debug(f"[flowus] CDP cookie save failed: {e}")
 

@@ -190,6 +190,55 @@ def test_worker_structured_search_task_maps_to_command_runner_without_shell(monk
     assert events[-1]["result"] == {"fetched": 1, "errors": 0, "command": 'feedgrab x-so "claude code,openclaw"'}
 
 
+def test_worker_structured_reddit_search_maps_to_reddit_so_with_options(monkeypatch):
+    import sys
+
+    from feedgrab.worker import SidecarWorker
+
+    calls = []
+
+    def fake_command_runner(command, args):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        calls.append((command, args, os.environ.get("OUTPUT_DIR"), os.environ.get("OBSIDIAN_VAULT")))
+        print("Summary: D:/gui-output/Reddit/search/codex/codex_2026-06-28.md")
+
+    events = asyncio.run(
+        _run_lines(
+            SidecarWorker(fetch_service=FakeFetchService(), command_runner=fake_command_runner),
+            [
+                _request(
+                    "job_reddit_search",
+                    "fetch",
+                    {
+                        "platform": "reddit",
+                        "mode": "search",
+                        "targets": ["codex"],
+                        "options": {"sort": "comments", "time": "all", "limit": 10},
+                        "output_dir": "D:/gui-output",
+                    },
+                )
+            ],
+        )
+    )
+
+    assert calls == [
+        (
+            "reddit-so",
+            ["codex", "--sort", "comments", "--time", "all", "--limit", "10"],
+            "D:/gui-output",
+            "",
+        )
+    ]
+    artifact = next(event for event in events if event.get("event") == "artifact")
+    assert artifact["artifact"]["path"].endswith("Reddit/search/codex/codex_2026-06-28.md")
+    assert events[-1]["result"] == {
+        "fetched": 1,
+        "errors": 0,
+        "command": "feedgrab reddit-so codex --sort comments --time all --limit 10",
+    }
+
+
 def test_worker_structured_task_emits_queued_log_while_waiting_for_fetch_lock():
     from feedgrab.worker import SidecarWorker
 
@@ -666,6 +715,86 @@ def test_login_uses_current_session_dir_after_env_change(monkeypatch, tmp_path):
     assert captured == [("feishu", new_dir / "feishu.json")]
 
 
+def test_login_reddit_uses_managed_cdp_instead_of_playwright_visible(monkeypatch, tmp_path):
+    import importlib
+    import feedgrab.login as login_module
+
+    session_dir = tmp_path / "sessions"
+    calls = []
+
+    monkeypatch.setenv("FEEDGRAB_DATA_DIR", str(session_dir))
+    monkeypatch.setenv("CHROME_CDP_LOGIN", "true")
+    login_module = importlib.reload(login_module)
+
+    monkeypatch.setattr(login_module, "_login_via_cdp", lambda canonical, session_path: False)
+
+    def fake_interactive_cdp(canonical, login_url, session_path):
+        calls.append(("interactive", canonical, login_url, session_path))
+        return len(calls) >= 3
+
+    def fake_start_managed(canonical, session_path):
+        calls.append(("managed", canonical, session_path))
+        return True
+
+    monkeypatch.setattr(login_module, "_login_interactive_via_cdp", fake_interactive_cdp)
+    monkeypatch.setattr(login_module, "_start_managed_chrome_cdp", fake_start_managed)
+    monkeypatch.setattr(
+        login_module,
+        "_login_visible",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("reddit should not use Playwright visible login")),
+    )
+
+    login_module.login("reddit")
+
+    assert calls == [
+        ("interactive", "reddit", "https://www.reddit.com/login/", session_dir / "reddit.json"),
+        ("managed", "reddit", session_dir / "reddit.json"),
+        ("interactive", "reddit", "https://www.reddit.com/login/", session_dir / "reddit.json"),
+    ]
+
+
+def test_login_reddit_uses_managed_cdp_when_cdp_setting_disabled(monkeypatch, tmp_path):
+    import importlib
+    import feedgrab.login as login_module
+
+    session_dir = tmp_path / "sessions"
+    calls = []
+
+    monkeypatch.setenv("FEEDGRAB_DATA_DIR", str(session_dir))
+    monkeypatch.setenv("CHROME_CDP_LOGIN", "false")
+    monkeypatch.setenv("FEEDGRAB_FORCE_INTERACTIVE_LOGIN", "true")
+    login_module = importlib.reload(login_module)
+
+    monkeypatch.setattr(
+        login_module,
+        "_login_via_cdp",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("reddit should not extract existing CDP cookies")),
+    )
+
+    def fake_start_managed(canonical, session_path):
+        calls.append(("managed", canonical, session_path))
+        return True
+
+    def fake_interactive_cdp(canonical, login_url, session_path):
+        calls.append(("interactive", canonical, login_url, session_path))
+        return True
+
+    monkeypatch.setattr(login_module, "_start_managed_chrome_cdp", fake_start_managed)
+    monkeypatch.setattr(login_module, "_login_interactive_via_cdp", fake_interactive_cdp)
+    monkeypatch.setattr(
+        login_module,
+        "_login_visible",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("reddit should not use Playwright visible login")),
+    )
+
+    login_module.login("reddit")
+
+    assert calls == [
+        ("managed", "reddit", session_dir / "reddit.json"),
+        ("interactive", "reddit", "https://www.reddit.com/login/", session_dir / "reddit.json"),
+    ]
+
+
 def test_login_cdp_mode_opens_interactive_cdp_when_no_existing_cookies(monkeypatch, tmp_path):
     import importlib
     import feedgrab.login as login_module
@@ -745,6 +874,1269 @@ def test_login_cdp_reuses_blank_page_for_interactive_login():
     assert context.primary_blank.goto_calls == [("https://my.feishu.cn", "domcontentloaded")]
     assert context.extra_blank.closed is True
     assert context.existing_app.closed is False
+
+
+def test_login_interactive_cdp_uses_discovered_browser_endpoint(monkeypatch, tmp_path):
+    import importlib
+    import sys
+    import types
+
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+    endpoints = []
+    pages = []
+    saved = []
+
+    class FakePage:
+        def __init__(self):
+            self.url = "about:blank"
+            self.closed = False
+            self.goto_calls = []
+            self.wait_calls = []
+            pages.append(self)
+
+        def is_closed(self):
+            return self.closed
+
+        def bring_to_front(self):
+            pass
+
+        def goto(self, url, wait_until=None):
+            self.goto_calls.append((url, wait_until))
+            self.url = url
+
+        def wait_for_timeout(self, timeout):
+            self.wait_calls.append(timeout)
+
+        def close(self):
+            self.closed = True
+
+    class FakeContext:
+        def __init__(self):
+            self.pages = [FakePage()]
+            self.cookie_calls = 0
+
+        def new_page(self):
+            page = FakePage()
+            self.pages.append(page)
+            return page
+
+        def cookies(self):
+            self.cookie_calls += 1
+            if self.cookie_calls == 1:
+                return []
+            return [{"name": "reddit_session", "value": "token", "domain": ".reddit.com"}]
+
+    class FakeBrowser:
+        def __init__(self):
+            self.context = FakeContext()
+            self.contexts = [self.context]
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class FakeChromium:
+        def connect_over_cdp(self, endpoint):
+            endpoints.append(endpoint)
+            return FakeBrowser()
+
+    class FakePlaywright:
+        chromium = FakeChromium()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setitem(
+        sys.modules,
+        "playwright.sync_api",
+        types.SimpleNamespace(sync_playwright=lambda: FakePlaywright()),
+    )
+    monkeypatch.setattr(
+        login_module,
+        "_cdp_browser_endpoint",
+        lambda port: f"ws://127.0.0.1:{port}/devtools/browser/actual-id",
+    )
+    monkeypatch.setattr(
+        login_module,
+        "_write_cdp_storage_state",
+        lambda path, cookies, source: saved.append((path, cookies, source)),
+    )
+
+    ok = login_module._login_interactive_via_cdp(
+        "reddit",
+        "https://www.reddit.com/login/",
+        tmp_path / "reddit.json",
+    )
+
+    assert ok is True
+    assert endpoints == ["ws://127.0.0.1:9222/devtools/browser/actual-id"]
+    assert pages[0].goto_calls == [
+        ("https://www.reddit.com/", "domcontentloaded"),
+        ("https://www.reddit.com/login/", "domcontentloaded"),
+    ]
+    assert saved[0][0] == tmp_path / "reddit.json"
+    assert saved[0][1] == [{"name": "reddit_session", "value": "token", "domain": ".reddit.com"}]
+
+
+def test_login_interactive_cdp_rejects_weak_wechat_qq_cookies(monkeypatch, tmp_path):
+    import importlib
+    import sys
+    import types
+
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+    saved = []
+
+    class FakePage:
+        def __init__(self):
+            self.url = "about:blank"
+            self.closed = False
+            self.goto_calls = []
+            self.wait_calls = []
+
+        def is_closed(self):
+            return self.closed
+
+        def bring_to_front(self):
+            pass
+
+        def goto(self, url, wait_until=None):
+            self.goto_calls.append((url, wait_until))
+            self.url = url
+
+        def wait_for_timeout(self, timeout):
+            self.wait_calls.append(timeout)
+            if len(self.wait_calls) >= 2:
+                self.closed = True
+
+        def close(self):
+            self.closed = True
+
+    class FakeContext:
+        def __init__(self):
+            self.page = FakePage()
+            self.pages = [self.page]
+            self.cookie_calls = 0
+
+        def new_page(self):
+            page = FakePage()
+            self.pages.append(page)
+            return page
+
+        def cookies(self):
+            self.cookie_calls += 1
+            if self.cookie_calls == 1:
+                return []
+            return [
+                {"name": "uin", "value": "fake", "domain": ".qq.com"},
+                {"name": "rewardsn", "value": "fake", "domain": ".qq.com"},
+            ]
+
+    class FakeBrowser:
+        def __init__(self):
+            self.context = FakeContext()
+            self.contexts = [self.context]
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class FakeChromium:
+        def connect_over_cdp(self, endpoint):
+            return FakeBrowser()
+
+    class FakePlaywright:
+        chromium = FakeChromium()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setitem(
+        sys.modules,
+        "playwright.sync_api",
+        types.SimpleNamespace(sync_playwright=lambda: FakePlaywright()),
+    )
+    monkeypatch.setattr(
+        login_module,
+        "_cdp_browser_endpoint",
+        lambda port: f"ws://127.0.0.1:{port}/devtools/browser/actual-id",
+    )
+    monkeypatch.setattr(login_module, "_cdp_login_timeout", lambda: 10)
+    monkeypatch.setattr(
+        login_module,
+        "_write_cdp_storage_state",
+        lambda path, cookies, source: saved.append((path, cookies, source)),
+    )
+
+    ok = login_module._login_interactive_via_cdp(
+        "wechat",
+        "https://mp.weixin.qq.com",
+        tmp_path / "wechat.json",
+    )
+
+    assert ok is False
+    assert saved == []
+
+
+def test_login_interactive_cdp_saves_wechat_backend_token_page_without_cookie_change(monkeypatch, tmp_path):
+    import importlib
+    import sys
+    import types
+
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+    saved = []
+
+    class FakePage:
+        def __init__(self):
+            self.url = "about:blank"
+            self.closed = False
+
+        def is_closed(self):
+            return self.closed
+
+        def bring_to_front(self):
+            pass
+
+        def goto(self, url, wait_until=None):
+            self.url = "https://mp.weixin.qq.com/cgi-bin/home?t=home/index&token=123&lang=zh_CN"
+
+        def wait_for_timeout(self, timeout):
+            pass
+
+        def close(self):
+            self.closed = True
+
+    class FakeContext:
+        def __init__(self):
+            self.page = FakePage()
+            self.pages = [self.page]
+
+        def new_page(self):
+            page = FakePage()
+            self.pages.append(page)
+            return page
+
+        def cookies(self):
+            return [
+                {"name": "slave_sid", "value": "secret", "domain": ".qq.com"},
+                {"name": "data_bizuin", "value": "123", "domain": ".qq.com"},
+            ]
+
+    class FakeBrowser:
+        def __init__(self):
+            self.context = FakeContext()
+            self.contexts = [self.context]
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class FakeChromium:
+        def connect_over_cdp(self, endpoint):
+            return FakeBrowser()
+
+    class FakePlaywright:
+        chromium = FakeChromium()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setitem(
+        sys.modules,
+        "playwright.sync_api",
+        types.SimpleNamespace(sync_playwright=lambda: FakePlaywright()),
+    )
+    monkeypatch.setattr(
+        login_module,
+        "_cdp_browser_endpoint",
+        lambda port: f"ws://127.0.0.1:{port}/devtools/browser/actual-id",
+    )
+    monkeypatch.setattr(
+        login_module,
+        "_write_cdp_storage_state",
+        lambda path, cookies, source: saved.append((path, cookies, source)),
+    )
+
+    ok = login_module._login_interactive_via_cdp(
+        "wechat",
+        "https://mp.weixin.qq.com",
+        tmp_path / "wechat.json",
+    )
+
+    assert ok is True
+    assert saved[0][0] == tmp_path / "wechat.json"
+    assert saved[0][1] == [
+        {"name": "slave_sid", "value": "secret", "domain": ".qq.com"},
+        {"name": "data_bizuin", "value": "123", "domain": ".qq.com"},
+    ]
+
+
+def test_wechat_cdp_cookie_validation_requires_mp_or_reader_session():
+    import importlib
+
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+
+    weak_cookies = [
+        {"name": "uin", "value": "fake", "domain": ".qq.com"},
+        {"name": "rewardsn", "value": "fake", "domain": ".qq.com"},
+    ]
+    mp_backend_cookies = [
+        {"name": "slave_sid", "value": "fake", "domain": ".qq.com"},
+        {"name": "data_bizuin", "value": "fake", "domain": ".qq.com"},
+    ]
+    reader_cookies = [
+        {"name": "wxuin", "value": "fake", "domain": ".qq.com"},
+        {"name": "pass_ticket", "value": "fake", "domain": ".qq.com"},
+    ]
+
+    assert login_module._cdp_cookies_sufficient_for_login("wechat", weak_cookies) is False
+    assert login_module._cdp_cookies_sufficient_for_login("wechat", mp_backend_cookies) is True
+    assert login_module._cdp_cookies_sufficient_for_login("wechat", reader_cookies) is True
+    assert login_module._cdp_cookies_sufficient_for_login("reddit", [{"name": "foo"}]) is False
+    assert login_module._cdp_cookies_sufficient_for_login("reddit", [{"name": "token_v2", "value": "visitor"}]) is False
+    assert login_module._cdp_cookies_sufficient_for_login("reddit", [{"name": "reddit_session", "value": "token"}]) is True
+
+
+def test_xhs_login_cookie_validation_rejects_visitor_a1_without_web_session():
+    import importlib
+
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+
+    visitor_cookies = [
+        {"name": "a1", "value": "device-cookie", "domain": ".xiaohongshu.com"},
+    ]
+    logged_in_cookies = [
+        {"name": "a1", "value": "device-cookie", "domain": ".xiaohongshu.com"},
+        {"name": "web_session", "value": "account-session", "domain": ".xiaohongshu.com"},
+    ]
+
+    assert login_module._visible_cookies_sufficient_for_login("xhs", visitor_cookies) is False
+    assert login_module._cdp_cookies_sufficient_for_login("xhs", visitor_cookies) is False
+    assert login_module._visible_cookies_sufficient_for_login("xhs", logged_in_cookies) is True
+    assert login_module._cdp_cookies_sufficient_for_login("xhs", logged_in_cookies) is True
+
+
+def test_login_visible_uses_persistent_context_and_reuses_blank_page(monkeypatch, tmp_path):
+    import importlib
+    import sys
+    import types
+
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+    saved = []
+
+    class FakePage:
+        def __init__(self, url):
+            self.url = url
+            self.goto_calls = []
+            self.fronted = False
+            self.closed = False
+
+        def is_closed(self):
+            return self.closed
+
+        def bring_to_front(self):
+            self.fronted = True
+
+        def goto(self, url, wait_until=None):
+            self.goto_calls.append((url, wait_until))
+            self.url = url
+
+        def wait_for_timeout(self, timeout):
+            self.closed = True
+
+        def wait_for_event(self, event, timeout=None):
+            assert event == "close"
+
+        def evaluate(self, _script):
+            return {"ok": True, "blocked": False}
+
+    class FakeContext:
+        def __init__(self):
+            self.initial_page = FakePage("about:blank")
+            self.pages = [self.initial_page]
+            self.new_page_calls = 0
+            self.closed = False
+
+        def cookies(self):
+            return [{"name": "reddit_session", "value": "token", "domain": ".reddit.com"}]
+
+        def new_page(self):
+            self.new_page_calls += 1
+            page = FakePage("about:blank")
+            self.pages.append(page)
+            return page
+
+        def close(self):
+            self.closed = True
+
+    class FakeChromium:
+        def __init__(self):
+            self.context = FakeContext()
+            self.launch_calls = []
+            self.persistent_calls = []
+
+        def launch(self, **kwargs):
+            self.launch_calls.append(kwargs)
+            raise AssertionError("visible login should not create a separate browser context")
+
+        def launch_persistent_context(self, user_data_dir, **kwargs):
+            self.persistent_calls.append((user_data_dir, kwargs))
+            return self.context
+
+    class FakePlaywright:
+        def __init__(self):
+            self.chromium = FakeChromium()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    fake_playwright = FakePlaywright()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "playwright.sync_api",
+        types.SimpleNamespace(sync_playwright=lambda: fake_playwright),
+    )
+    monkeypatch.setattr(login_module, "_save_session", lambda context, path: saved.append((context, path)))
+
+    session_path = tmp_path / "sessions" / "reddit.json"
+    login_module._login_visible("https://www.reddit.com/login/", session_path, "reddit")
+
+    assert fake_playwright.chromium.launch_calls == []
+    assert len(fake_playwright.chromium.persistent_calls) == 1
+    profile_dir, options = fake_playwright.chromium.persistent_calls[0]
+    assert os.path.basename(os.path.dirname(profile_dir)) == ".browser-profiles"
+    assert os.path.basename(profile_dir).startswith("reddit-")
+    assert options["channel"] == "chrome"
+    assert "--disable-blink-features=AutomationControlled" not in options["args"]
+    assert "--disable-infobars" not in options["args"]
+    assert "--no-first-run" in options["args"]
+    assert "--no-default-browser-check" in options["args"]
+    assert "--enable-automation" in options["ignore_default_args"]
+    assert "--no-sandbox" in options["ignore_default_args"]
+    assert fake_playwright.chromium.context.new_page_calls == 0
+    assert fake_playwright.chromium.context.initial_page.fronted is True
+    assert fake_playwright.chromium.context.initial_page.goto_calls == [
+        ("https://www.reddit.com/login/", "domcontentloaded")
+    ]
+    assert saved == [(fake_playwright.chromium.context, session_path)]
+    assert fake_playwright.chromium.context.closed is True
+
+
+def test_login_visible_does_not_save_xhs_visitor_cookie(monkeypatch, tmp_path):
+    import importlib
+    import sys
+    import types
+
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+    saved = []
+
+    class FakePage:
+        def __init__(self, context):
+            self.context = context
+            self.url = "about:blank"
+            self.closed = False
+
+        def is_closed(self):
+            return self.closed
+
+        def bring_to_front(self):
+            pass
+
+        def goto(self, url, wait_until=None):
+            self.url = url
+
+        def wait_for_timeout(self, timeout):
+            self.context.wait_timeouts.append(timeout)
+            if len(self.context.wait_timeouts) >= 2:
+                self.closed = True
+
+    class FakeContext:
+        def __init__(self):
+            self.wait_timeouts = []
+            self.page = FakePage(self)
+            self.pages = [self.page]
+            self.closed = False
+
+        def cookies(self):
+            return [
+                {
+                    "name": "a1",
+                    "value": "device-cookie",
+                    "domain": ".xiaohongshu.com",
+                    "path": "/",
+                }
+            ]
+
+        def close(self):
+            self.closed = True
+
+    class FakeChromium:
+        def __init__(self):
+            self.context = FakeContext()
+
+        def launch_persistent_context(self, *_args, **_kwargs):
+            return self.context
+
+    class FakePlaywright:
+        def __init__(self):
+            self.chromium = FakeChromium()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    fake_playwright = FakePlaywright()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "playwright.sync_api",
+        types.SimpleNamespace(sync_playwright=lambda: fake_playwright),
+    )
+    monkeypatch.setattr(login_module, "_save_session", lambda context, path: saved.append((context, path)))
+
+    login_module._login_visible("https://www.xiaohongshu.com/explore", tmp_path / "sessions" / "xhs.json", "xhs")
+
+    assert saved == []
+    assert fake_playwright.chromium.context.closed is True
+
+
+def test_visible_login_does_not_save_unchanged_xhs_web_session(monkeypatch, tmp_path):
+    import importlib
+
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+    saved = []
+
+    class FakePage:
+        def __init__(self):
+            self.closed = False
+            self.waits = 0
+
+        def is_closed(self):
+            return self.closed
+
+        def wait_for_timeout(self, _timeout):
+            self.waits += 1
+            if self.waits >= 3:
+                self.closed = True
+
+    class FakeContext:
+        def cookies(self):
+            return [
+                {"name": "a1", "value": "device-cookie", "domain": ".xiaohongshu.com"},
+                {"name": "web_session", "value": "visitor-session", "domain": ".xiaohongshu.com"},
+            ]
+
+    monkeypatch.setattr(login_module, "_save_session", lambda context, path: saved.append((context, path)))
+
+    page = FakePage()
+    result = login_module._wait_for_visible_login_and_save(
+        FakeContext(), page, tmp_path / "sessions" / "xhs.json", "xhs"
+    )
+
+    assert result is False
+    assert saved == []
+
+
+def test_visible_login_saves_xhs_after_web_session_changes(monkeypatch, tmp_path):
+    import importlib
+
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+    saved = []
+
+    class FakePage:
+        closed = False
+
+        def is_closed(self):
+            return self.closed
+
+        def wait_for_timeout(self, _timeout):
+            pass
+
+        def evaluate(self, _script):
+            return {"ok": True, "hasCurrentUser": True}
+
+    class FakeContext:
+        def __init__(self):
+            self.calls = 0
+
+        def cookies(self):
+            self.calls += 1
+            value = "visitor-session" if self.calls <= 1 else "account-session"
+            return [
+                {"name": "a1", "value": "device-cookie", "domain": ".xiaohongshu.com"},
+                {"name": "web_session", "value": value, "domain": ".xiaohongshu.com"},
+            ]
+
+    monkeypatch.setattr(login_module, "_save_session", lambda context, path: saved.append((context, path)))
+
+    context = FakeContext()
+    session_path = tmp_path / "sessions" / "xhs.json"
+    result = login_module._wait_for_visible_login_and_save(context, FakePage(), session_path, "xhs")
+
+    assert result is True
+    assert saved == [(context, session_path)]
+
+
+def test_visible_login_does_not_save_unchanged_flowus_auth_cookie(monkeypatch, tmp_path):
+    import importlib
+
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+    saved = []
+
+    class FakePage:
+        def __init__(self):
+            self.closed = False
+            self.waits = 0
+
+        def is_closed(self):
+            return self.closed
+
+        def wait_for_timeout(self, _timeout):
+            self.waits += 1
+            if self.waits >= 3:
+                self.closed = True
+
+    class FakeContext:
+        def cookies(self):
+            return [
+                {"name": "next_auth", "value": "visitor-token", "domain": ".flowus.cn"},
+                {"name": "next_auth.sig", "value": "visitor-sig", "domain": ".flowus.cn"},
+            ]
+
+    monkeypatch.setattr(login_module, "_save_session", lambda context, path: saved.append((context, path)))
+
+    page = FakePage()
+    result = login_module._wait_for_visible_login_and_save(
+        FakeContext(), page, tmp_path / "sessions" / "flowus.json", "flowus"
+    )
+
+    assert result is False
+    assert saved == []
+
+
+def test_visible_login_does_not_save_flowus_while_still_on_login_page(monkeypatch, tmp_path):
+    import importlib
+
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+    saved = []
+
+    class FakePage:
+        url = "https://flowus.cn/login"
+
+        def __init__(self):
+            self.closed = False
+            self.waits = 0
+
+        def is_closed(self):
+            return self.closed
+
+        def wait_for_timeout(self, _timeout):
+            self.waits += 1
+            if self.waits >= 5:
+                self.closed = True
+
+        def evaluate(self, _script):
+            return {
+                "ok": False,
+                "url": self.url,
+                "isLoginRoute": True,
+                "hasLoginForm": True,
+                "text": "请输入手机号/邮箱 使用验证码登录",
+            }
+
+    class FakeContext:
+        def __init__(self):
+            self.calls = 0
+
+        def cookies(self):
+            self.calls += 1
+            value = "visitor" if self.calls <= 1 else "changed-before-login-complete"
+            return [
+                {"name": "next_auth", "value": value, "domain": ".flowus.cn"},
+                {"name": "next_auth.sig", "value": "sig", "domain": ".flowus.cn"},
+            ]
+
+    monkeypatch.setattr(login_module, "_save_session", lambda context, path: saved.append((context, path)))
+
+    page = FakePage()
+    result = login_module._wait_for_visible_login_and_save(
+        FakeContext(), page, tmp_path / "sessions" / "flowus.json", "flowus"
+    )
+
+    assert result is False
+    assert saved == []
+
+
+def test_visible_login_saves_flowus_after_page_success(monkeypatch, tmp_path):
+    import importlib
+
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+    saved = []
+
+    class FakePage:
+        closed = False
+
+        def is_closed(self):
+            return self.closed
+
+        def wait_for_timeout(self, _timeout):
+            pass
+
+        def evaluate(self, _script):
+            return {
+                "ok": True,
+                "apiOk": True,
+                "isLoginRoute": False,
+                "hasLoginForm": False,
+                "url": "https://flowus.cn/recent",
+            }
+
+    class FakeContext:
+        def __init__(self):
+            self.calls = 0
+
+        def cookies(self):
+            self.calls += 1
+            value = "visitor" if self.calls <= 1 else "account"
+            return [
+                {"name": "next_auth", "value": value, "domain": ".flowus.cn"},
+                {"name": "next_auth.sig", "value": "sig", "domain": ".flowus.cn"},
+            ]
+
+    monkeypatch.setattr(login_module, "_save_session", lambda context, path: saved.append((context, path)))
+
+    context = FakeContext()
+    session_path = tmp_path / "sessions" / "flowus.json"
+    result = login_module._wait_for_visible_login_and_save(context, FakePage(), session_path, "flowus")
+
+    assert result is True
+    assert saved == [(context, session_path)]
+
+
+def test_visible_login_does_not_save_xhs_while_login_dialog_visible(monkeypatch, tmp_path):
+    import importlib
+
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+    saved = []
+
+    class FakePage:
+        url = "https://www.xiaohongshu.com/explore"
+
+        def __init__(self):
+            self.closed = False
+            self.waits = 0
+
+        def is_closed(self):
+            return self.closed
+
+        def wait_for_timeout(self, _timeout):
+            self.waits += 1
+            if self.waits >= 5:
+                self.closed = True
+
+        def evaluate(self, _script):
+            return {
+                "ok": False,
+                "hasLoginDialog": True,
+                "hasCurrentUser": False,
+                "text": "扫码登录 验证码登录 手机号登录",
+            }
+
+    class FakeContext:
+        def __init__(self):
+            self.calls = 0
+
+        def cookies(self):
+            self.calls += 1
+            value = "visitor-session" if self.calls <= 1 else "changed-before-qr-finished"
+            return [
+                {"name": "a1", "value": "device-cookie", "domain": ".xiaohongshu.com"},
+                {"name": "web_session", "value": value, "domain": ".xiaohongshu.com"},
+            ]
+
+    monkeypatch.setattr(login_module, "_save_session", lambda context, path: saved.append((context, path)))
+
+    page = FakePage()
+    result = login_module._wait_for_visible_login_and_save(
+        FakeContext(), page, tmp_path / "sessions" / "xhs.json", "xhs"
+    )
+
+    assert result is False
+    assert saved == []
+
+
+def test_visible_login_does_not_save_reddit_blocked_page(monkeypatch, tmp_path):
+    import importlib
+
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+    saved = []
+
+    class FakePage:
+        def __init__(self):
+            self.closed = False
+            self.waits = 0
+
+        def is_closed(self):
+            return self.closed
+
+        def wait_for_timeout(self, _timeout):
+            self.waits += 1
+            if self.waits >= 4:
+                self.closed = True
+
+        def evaluate(self, _script):
+            return {
+                "ok": False,
+                "blocked": True,
+                "url": "https://www.reddit.com/login/?solution=blocked",
+                "text": "You've been blocked by network security.",
+            }
+
+    class FakeContext:
+        def cookies(self):
+            return [{"name": "reddit_session", "value": "token", "domain": ".reddit.com"}]
+
+    monkeypatch.setattr(login_module, "_save_session", lambda context, path: saved.append((context, path)))
+
+    page = FakePage()
+    result = login_module._wait_for_visible_login_and_save(
+        FakeContext(), page, tmp_path / "sessions" / "reddit.json", "reddit"
+    )
+
+    assert result is False
+    assert saved == []
+
+
+def test_visible_login_does_not_save_generic_platform_while_login_form_visible(monkeypatch, tmp_path):
+    import importlib
+
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+    saved = []
+
+    class FakePage:
+        def __init__(self):
+            self.closed = False
+            self.waits = 0
+
+        def is_closed(self):
+            return self.closed
+
+        def wait_for_timeout(self, _timeout):
+            self.waits += 1
+            if self.waits >= 4:
+                self.closed = True
+
+        def evaluate(self, _script):
+            return {
+                "ok": False,
+                "url": "https://my.feishu.cn/login",
+                "loginRoute": True,
+                "hasLoginForm": True,
+                "hasBlockedText": False,
+            }
+
+    class FakeContext:
+        def cookies(self):
+            return [{"name": "session", "value": "token", "domain": ".feishu.cn"}]
+
+    monkeypatch.setattr(login_module, "_save_session", lambda context, path: saved.append((context, path)))
+
+    page = FakePage()
+    result = login_module._wait_for_visible_login_and_save(
+        FakeContext(), page, tmp_path / "sessions" / "feishu.json", "feishu"
+    )
+
+    assert result is False
+    assert saved == []
+
+
+def test_visible_login_saves_generic_platform_after_page_success(monkeypatch, tmp_path):
+    import importlib
+
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+    saved = []
+
+    class FakePage:
+        closed = False
+
+        def is_closed(self):
+            return self.closed
+
+        def wait_for_timeout(self, _timeout):
+            pass
+
+        def evaluate(self, _script):
+            return {
+                "ok": True,
+                "url": "https://my.feishu.cn/wiki/home",
+                "loginRoute": False,
+                "hasLoginForm": False,
+                "hasBlockedText": False,
+            }
+
+    class FakeContext:
+        def cookies(self):
+            return [{"name": "session", "value": "token", "domain": ".feishu.cn"}]
+
+    monkeypatch.setattr(login_module, "_save_session", lambda context, path: saved.append((context, path)))
+
+    context = FakeContext()
+    session_path = tmp_path / "sessions" / "feishu.json"
+    result = login_module._wait_for_visible_login_and_save(context, FakePage(), session_path, "feishu")
+
+    assert result is True
+    assert saved == [(context, session_path)]
+
+
+def test_login_visible_saves_detected_login_before_browser_window_closes(monkeypatch, tmp_path):
+    import importlib
+    import sys
+    import types
+
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+    saved = []
+
+    class FakePage:
+        def __init__(self, context):
+            self.context = context
+            self.url = "about:blank"
+            self.goto_calls = []
+            self.fronted = False
+            self.closed = False
+
+        def is_closed(self):
+            return self.closed
+
+        def bring_to_front(self):
+            self.fronted = True
+
+        def goto(self, url, wait_until=None):
+            self.goto_calls.append((url, wait_until))
+            self.url = url
+
+        def wait_for_timeout(self, timeout):
+            self.context.wait_timeouts.append(timeout)
+
+        def wait_for_event(self, event, timeout=None):
+            assert event == "close"
+            self.closed = True
+            self.context.closed = True
+
+        def evaluate(self, _script):
+            return {"ok": True, "url": "https://my.feishu.cn/wiki/home", "hasLoginForm": False}
+
+    class FakeContext:
+        def __init__(self):
+            self.closed = False
+            self.cookie_calls = 0
+            self.wait_timeouts = []
+            self.initial_page = FakePage(self)
+            self.pages = [self.initial_page]
+
+        def cookies(self):
+            self.cookie_calls += 1
+            if self.cookie_calls == 1:
+                return []
+            return [
+                {
+                    "name": "session",
+                    "value": "logged-in",
+                    "domain": ".feishu.cn",
+                    "path": "/",
+                    "expires": -1,
+                    "httpOnly": True,
+                    "secure": True,
+                    "sameSite": "None",
+                }
+            ]
+
+        def new_page(self):
+            page = FakePage(self)
+            self.pages.append(page)
+            return page
+
+        def close(self):
+            self.closed = True
+
+    class FakeChromium:
+        def __init__(self):
+            self.context = FakeContext()
+
+        def launch_persistent_context(self, *_args, **_kwargs):
+            return self.context
+
+    class FakePlaywright:
+        def __init__(self):
+            self.chromium = FakeChromium()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    fake_playwright = FakePlaywright()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "playwright.sync_api",
+        types.SimpleNamespace(sync_playwright=lambda: fake_playwright),
+    )
+
+    def fake_save_session(context, path):
+        assert context.closed is False
+        saved.append(path)
+
+    monkeypatch.setattr(login_module, "_save_session", fake_save_session)
+
+    session_path = tmp_path / "sessions" / "feishu.json"
+    login_module._login_visible("https://my.feishu.cn", session_path, "feishu")
+
+    assert saved == [session_path]
+    assert fake_playwright.chromium.context.closed is True
+
+
+def test_login_visible_saves_existing_profile_login_before_browser_window_closes(monkeypatch, tmp_path):
+    import importlib
+    import sys
+    import types
+
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+    saved = []
+
+    class FakePage:
+        def __init__(self, context):
+            self.context = context
+            self.url = "about:blank"
+            self.closed = False
+
+        def is_closed(self):
+            return self.closed
+
+        def bring_to_front(self):
+            pass
+
+        def goto(self, url, wait_until=None):
+            self.url = url
+
+        def wait_for_timeout(self, timeout):
+            self.context.wait_timeouts.append(timeout)
+
+        def wait_for_event(self, event, timeout=None):
+            assert event == "close"
+            self.closed = True
+            self.context.closed = True
+
+        def evaluate(self, _script):
+            return {"ok": True, "url": "https://my.feishu.cn/wiki/home", "hasLoginForm": False}
+
+    class FakeContext:
+        def __init__(self):
+            self.closed = False
+            self.wait_timeouts = []
+            self.page = FakePage(self)
+            self.pages = [self.page]
+
+        def cookies(self):
+            return [
+                {
+                    "name": "session",
+                    "value": "already-logged-in",
+                    "domain": ".feishu.cn",
+                    "path": "/",
+                    "expires": -1,
+                    "httpOnly": True,
+                    "secure": True,
+                    "sameSite": "None",
+                }
+            ]
+
+        def new_page(self):
+            return self.page
+
+        def close(self):
+            self.closed = True
+
+    class FakeChromium:
+        def __init__(self):
+            self.context = FakeContext()
+
+        def launch_persistent_context(self, *_args, **_kwargs):
+            return self.context
+
+    class FakePlaywright:
+        def __init__(self):
+            self.chromium = FakeChromium()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    fake_playwright = FakePlaywright()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "playwright.sync_api",
+        types.SimpleNamespace(sync_playwright=lambda: fake_playwright),
+    )
+
+    def fake_save_session(context, path):
+        assert context.closed is False
+        saved.append(path)
+
+    monkeypatch.setattr(login_module, "_save_session", fake_save_session)
+
+    session_path = tmp_path / "sessions" / "feishu.json"
+    login_module._login_visible("https://my.feishu.cn", session_path, "feishu")
+
+    assert saved == [session_path]
+    assert fake_playwright.chromium.context.closed is True
+
+
+def test_login_visible_uses_fresh_temporary_profile_for_each_attempt(monkeypatch, tmp_path):
+    import importlib
+    import sys
+    import types
+
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+    profile_dirs = []
+
+    class FakePage:
+        url = "about:blank"
+
+        def is_closed(self):
+            return False
+
+        def bring_to_front(self):
+            pass
+
+        def goto(self, url, wait_until=None):
+            self.url = url
+
+        def wait_for_timeout(self, timeout):
+            pass
+
+        def evaluate(self, _script):
+            return {"ok": True, "url": "https://my.feishu.cn/wiki/home", "hasLoginForm": False}
+
+    class FakeContext:
+        def __init__(self):
+            self.page = FakePage()
+            self.pages = [self.page]
+
+        def cookies(self):
+            return [
+                {
+                    "name": "session",
+                    "value": "logged-in",
+                    "domain": ".feishu.cn",
+                    "path": "/",
+                }
+            ]
+
+        def close(self):
+            pass
+
+    class FakeChromium:
+        def launch_persistent_context(self, user_data_dir, **_kwargs):
+            profile_dirs.append(user_data_dir)
+            return FakeContext()
+
+    class FakePlaywright:
+        chromium = FakeChromium()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setitem(
+        sys.modules,
+        "playwright.sync_api",
+        types.SimpleNamespace(sync_playwright=lambda: FakePlaywright()),
+    )
+    monkeypatch.setattr(login_module, "_save_session", lambda _context, _path: None)
+
+    session_path = tmp_path / "sessions" / "feishu_2.json"
+    login_module._login_visible("https://my.feishu.cn", session_path, "feishu")
+    login_module._login_visible("https://my.feishu.cn", session_path, "feishu")
+
+    assert len(profile_dirs) == 2
+    assert profile_dirs[0] != profile_dirs[1]
+    assert all(os.path.basename(path).startswith("feishu_2-") for path in profile_dirs)
+    assert all(os.path.basename(os.path.dirname(path)) == ".browser-profiles" for path in profile_dirs)
+
+
+def test_managed_cdp_profile_uses_session_stem_for_numbered_accounts(tmp_path):
+    import importlib
+    import feedgrab.login as login_module
+
+    login_module = importlib.reload(login_module)
+
+    base_session = tmp_path / "sessions" / "reddit.json"
+    numbered_session = tmp_path / "sessions" / "reddit_2.json"
+
+    assert login_module._managed_cdp_profile_dir(base_session, "reddit") == (
+        tmp_path / "sessions" / ".browser-profiles" / "reddit-cdp"
+    )
+    assert login_module._managed_cdp_profile_dir(numbered_session, "reddit") == (
+        tmp_path / "sessions" / ".browser-profiles" / "reddit_2-cdp"
+    )
 
 
 def test_login_cdp_mode_falls_back_to_visible_login_when_cdp_fails(monkeypatch, tmp_path):

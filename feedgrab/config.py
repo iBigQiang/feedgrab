@@ -1037,6 +1037,43 @@ def reddit_fetch_all_comments() -> bool:
     return os.getenv("REDDIT_FETCH_ALL_COMMENTS", "false").lower() in ("true", "1", "yes")
 
 
+def reddit_reply_mode() -> str:
+    value = os.getenv("REDDIT_REPLY_MODE", "top").strip().lower()
+    return value if value in ("top", "tree", "all") else "top"
+
+
+def reddit_retry_attempts() -> int:
+    try:
+        value = int(os.getenv("REDDIT_RETRY_ATTEMPTS", "3"))
+    except ValueError:
+        return 3
+    return max(1, min(value, 5))
+
+
+def reddit_max_pages() -> int:
+    try:
+        value = int(os.getenv("REDDIT_MAX_PAGES", "5"))
+    except ValueError:
+        return 5
+    return max(1, min(value, 20))
+
+
+def reddit_morechildren_rounds() -> int:
+    try:
+        value = int(os.getenv("REDDIT_MORECHILDREN_ROUNDS", "2"))
+    except ValueError:
+        return 2
+    return max(0, min(value, 5))
+
+
+def reddit_morechildren_batch_size() -> int:
+    try:
+        value = int(os.getenv("REDDIT_MORECHILDREN_BATCH_SIZE", "100"))
+    except ValueError:
+        return 100
+    return max(1, min(value, 100))
+
+
 def reddit_user_agent() -> str:
     raw = os.getenv("REDDIT_USER_AGENT", "").strip()
     if raw:
@@ -1056,6 +1093,36 @@ def reddit_sub_delay() -> float:
         return float(os.getenv("REDDIT_SUB_DELAY", "2.0"))
     except ValueError:
         return 2.0
+
+
+def reddit_search_enabled() -> bool:
+    return os.getenv("REDDIT_SEARCH_ENABLED", "true").lower() in ("true", "1", "yes")
+
+
+def reddit_search_sort() -> str:
+    value = os.getenv("REDDIT_SEARCH_SORT", "relevance").strip().lower()
+    return value if value in ("relevance", "hot", "top", "new", "comments") else "relevance"
+
+
+def reddit_search_time_range() -> str:
+    value = os.getenv("REDDIT_SEARCH_TIME_RANGE", "all").strip().lower()
+    return value if value in ("all", "year", "month", "week", "day", "hour") else "all"
+
+
+def reddit_search_limit() -> int:
+    try:
+        value = int(os.getenv("REDDIT_SEARCH_LIMIT", "10"))
+    except ValueError:
+        return 10
+    return max(1, min(value, 100))
+
+
+def reddit_search_save_posts() -> bool:
+    return os.getenv("REDDIT_SEARCH_SAVE_POSTS", "false").lower() in ("true", "1", "yes")
+
+
+def reddit_search_subreddit() -> str:
+    return os.getenv("REDDIT_SEARCH_SUBREDDIT", "").strip().strip("/")
 
 
 # ----- Weibo -----

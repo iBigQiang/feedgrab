@@ -460,10 +460,10 @@ class XhsApiClient:
 
                 if resp.status_code in (429, 500, 502, 503, 504):
                     wait = (2**attempt) + random.uniform(0, 1)
-                logger.warning(
-                    f"[XHS-API] HTTP {resp.status_code}, "
-                    f"{wait:.1f}s 后重试（{attempt + 1}/{self._max_retries}）"
-                )
+                    logger.warning(
+                        f"[XHS-API] HTTP {resp.status_code}, "
+                        f"{wait:.1f}s 后重试（{attempt + 1}/{self._max_retries}）"
+                    )
                     time.sleep(wait)
                     continue
                 return self._handle_response(resp)

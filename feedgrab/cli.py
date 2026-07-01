@@ -469,7 +469,7 @@ def cmd_detect_ua():
 def cmd_doctor(platform: str = "all"):
     """Run diagnostic checks on feedgrab integrations.
 
-    platform: 'all' | 'x' | 'xhs' | 'mpweixin'
+    platform: 'all' | 'x' | 'xhs' | 'mpweixin' | 'feishu' | 'reddit'
     """
     import time
     from pathlib import Path
@@ -727,6 +727,73 @@ def cmd_doctor(platform: str = "all"):
         except Exception as e:
             fail(f"my.feishu.cn 不可访问：{e}")
 
+    # ── Reddit ───────────────────────────────────────────────────────
+    def check_reddit():
+        check_browser()
+
+        section("Reddit 后端探测")
+        try:
+            from feedgrab.fetchers.reddit import probe_reddit_backends
+            result = probe_reddit_backends()
+            active_backend = result.get("active_backend") or "none"
+            if result.get("status") == "ok":
+                ok(f"active_backend={active_backend}")
+            elif result.get("status") == "warning":
+                warn(f"active_backend={active_backend}")
+            else:
+                fail("未发现可用 Reddit 后端")
+
+            for item in result.get("checks", []):
+                name = item.get("name", "unknown")
+                status = item.get("status", "")
+                message = item.get("message", "")
+                line = f"{name}: {message}"
+                if status == "ok":
+                    ok(line)
+                elif status in {"warning", "off", "missing"}:
+                    warn(line)
+                else:
+                    fail(line)
+        except Exception as e:
+            fail(f"Reddit 后端探测失败：{e}")
+
+        section("Reddit 配置")
+        try:
+            from feedgrab.config import (
+                reddit_cdp_enabled,
+                reddit_max_comments,
+                reddit_max_pages,
+                reddit_morechildren_batch_size,
+                reddit_morechildren_rounds,
+                reddit_reply_mode,
+                reddit_retry_attempts,
+                reddit_user_agent,
+            )
+            ok(f"REDDIT_CDP_ENABLED={reddit_cdp_enabled()}")
+            ok(f"REDDIT_REPLY_MODE={reddit_reply_mode()}")
+            ok(f"REDDIT_MAX_COMMENTS={reddit_max_comments()}")
+            ok(f"REDDIT_MAX_PAGES={reddit_max_pages()}")
+            ok(f"REDDIT_RETRY_ATTEMPTS={reddit_retry_attempts()}")
+            ok(f"REDDIT_MORECHILDREN_ROUNDS={reddit_morechildren_rounds()}")
+            ok(f"REDDIT_MORECHILDREN_BATCH_SIZE={reddit_morechildren_batch_size()}")
+            ua = reddit_user_agent()
+            ok(f"REDDIT_USER_AGENT={ua[:48]}{'...' if len(ua) > 48 else ''}")
+        except Exception as e:
+            warn(f"Reddit 配置读取失败：{e}")
+
+        section("Reddit 网络")
+        try:
+            from feedgrab.utils.http_client import get as http_get
+            t0 = time.time()
+            resp = http_get("https://old.reddit.com/.json?raw_json=1", timeout=10)
+            elapsed = time.time() - t0
+            if resp.status_code == 200:
+                ok(f"old.reddit.com .json 可访问（{elapsed:.1f}s）")
+            else:
+                warn(f"old.reddit.com .json status {resp.status_code} ({elapsed:.1f}s)")
+        except Exception as e:
+            warn(f"old.reddit.com .json 不可访问：{e}")
+
     # ── Dispatch ─────────────────────────────────────────────────────
     platform = platform.lower()
     targets = {
@@ -737,6 +804,7 @@ def cmd_doctor(platform: str = "all"):
         "wechat": ("WeChat MP", check_mpweixin),
         "feishu": ("Feishu/Lark", check_feishu),
         "lark": ("Feishu/Lark", check_feishu),
+        "reddit": ("Reddit", check_reddit),
     }
 
     if platform == "all":
@@ -746,13 +814,14 @@ def cmd_doctor(platform: str = "all"):
         check_xhs()
         check_mpweixin()
         check_feishu()
+        check_reddit()
     elif platform in targets:
         label, fn = targets[platform]
         print(f"feedgrab doctor {platform} — {label} 诊断\n")
         fn()
     else:
         print(f"\u274c 未知平台：{platform}")
-        print("用法：feedgrab doctor [x | xhs | mpweixin | feishu]")
+        print("用法：feedgrab doctor [x | xhs | mpweixin | feishu | reddit]")
         return
 
     # ── Summary ──────────────────────────────────────────────────────
@@ -1291,6 +1360,88 @@ def cmd_reddit_sub(args: list):
                 continue
             saved += 1
         print(f"✅ Reddit r/{sub}: 保存 {saved}/{len(items)} 条")
+
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        print("\n⏹ 已取消")
+    except Exception as e:
+        print(f"❌ {e}")
+        sys.exit(1)
+
+
+def cmd_reddit_search(args: list):
+    """Search Reddit posts by keyword and generate a summary artifact."""
+    import asyncio
+
+    if not args:
+        print("❌ 用法：feedgrab reddit-so <keyword> [--sort relevance|hot|top|new|comments] [--time all|year|month|week|day|hour] [--limit N] [--subreddit NAME] [--save-posts]")
+        sys.exit(1)
+
+    from feedgrab.config import (
+        reddit_search_enabled,
+        reddit_search_limit,
+        reddit_search_save_posts,
+        reddit_search_sort,
+        reddit_search_subreddit,
+        reddit_search_time_range,
+    )
+
+    if not reddit_search_enabled():
+        print("❌ Reddit 帖子搜索未启用。")
+        print("   请在 .env 中设置 REDDIT_SEARCH_ENABLED=true 后再使用。")
+        return
+
+    keyword = args[0].strip()
+    sort = (_parse_named_str(args, "--sort") or reddit_search_sort()).lower()
+    if sort not in {"relevance", "hot", "top", "new", "comments"}:
+        print(f"❌ 不支持的 sort: {sort}（可选 relevance/hot/top/new/comments）")
+        sys.exit(1)
+    time_range = (_parse_named_str(args, "--time") or reddit_search_time_range()).lower()
+    if time_range not in {"all", "year", "month", "week", "day", "hour"}:
+        print(f"❌ 不支持的 time: {time_range}（可选 all/year/month/week/day/hour）")
+        sys.exit(1)
+    limit = _parse_named_int(args, "--limit") or _parse_named_int(args, "-n") or reddit_search_limit()
+    subreddit = _parse_named_str(args, "--subreddit") or reddit_search_subreddit()
+    save_posts = reddit_search_save_posts() or "--save-posts" in args or "--save" in args
+
+    async def run():
+        from feedgrab.fetchers.reddit import fetch_reddit, fetch_reddit_search
+        from feedgrab.schema import from_reddit
+        from feedgrab.utils.storage import save_to_markdown
+
+        scope = f"r/{subreddit}" if subreddit else "全站"
+        print(f"\n🔎 Reddit 搜索：{keyword}（{scope} / {sort} / {time_range} / limit={limit}）")
+        data = await fetch_reddit_search(
+            keyword,
+            sort=sort,
+            time_range=time_range,
+            limit=limit,
+            subreddit=subreddit,
+        )
+        content = from_reddit(data)
+        path = save_to_markdown(content)
+        if path:
+            print(f"Summary: {path}")
+        print(f"✅ Reddit 搜索完成：{len(data.get('items', []))} 条帖子")
+
+        if save_posts:
+            saved = 0
+            for item in data.get("items", []):
+                permalink = item.get("permalink")
+                if not permalink:
+                    continue
+                try:
+                    post_data = await fetch_reddit(permalink)
+                    post_content = from_reddit(post_data)
+                    post_content.category = "search/posts"
+                    post_path = save_to_markdown(post_content)
+                    if post_path:
+                        saved += 1
+                        print(f"Saved to Markdown: {post_path}")
+                except Exception as exc:
+                    print(f"⚠️ Reddit 单贴深抓失败：{permalink} ({exc})")
+            print(f"✅ Reddit 单贴深抓保存：{saved}/{len(data.get('items', []))}")
 
     try:
         asyncio.run(run())
@@ -2270,6 +2421,12 @@ def main():
             print("   示例：feedgrab reddit-sub MachineLearning --sort hot --limit 25")
             sys.exit(1)
         cmd_reddit_sub(sys.argv[2:])
+    elif cmd == "reddit-so":
+        if len(sys.argv) < 3:
+            print("❌ 用法：feedgrab reddit-so <keyword> [--sort relevance|hot|top|new|comments] [--time all|year|month|week|day|hour] [--limit N] [--subreddit NAME]")
+            print("   示例：feedgrab reddit-so codex --sort comments --time all --limit 10")
+            sys.exit(1)
+        cmd_reddit_search(sys.argv[2:])
     elif cmd == "weibo-user":
         if len(sys.argv) < 3:
             print("❌ 用法：feedgrab weibo-user <uid> [--limit N]")

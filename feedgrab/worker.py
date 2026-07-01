@@ -59,6 +59,7 @@ _STRUCTURED_COMMANDS = {
     ("xhs", "search"): "xhs-so",
     ("youtube", "search"): "ytb-so",
     ("zhihu", "search"): "zhihu-so",
+    ("reddit", "search"): "reddit-so",
     ("wechat", "account"): "mpweixin-id",
     ("wechat", "search"): "mpweixin-so",
 }
@@ -233,11 +234,15 @@ class SidecarWorker:
             if not isinstance(targets, list) or not all(isinstance(target, str) for target in targets):
                 self._emit_error(request_id, "invalid_params", "抓取参数 targets 必须是字符串列表")
                 return
+        options = params.get("options") or {}
+        if not isinstance(options, dict):
+            self._emit_error(request_id, "invalid_params", "抓取参数 options 必须是对象")
+            return
         if targets and not urls:
             platform = str(params.get("platform") or "").strip().lower()
             mode = str(params.get("mode") or "").strip().lower()
             task = asyncio.create_task(
-                self._run_structured_fetch_job(request_id, targets, platform, mode, str(output_dir))
+                self._run_structured_fetch_job(request_id, targets, platform, mode, str(output_dir), options)
             )
         else:
             task = asyncio.create_task(self._run_fetch_job(request_id, urls, str(output_dir)))
@@ -340,6 +345,7 @@ class SidecarWorker:
         platform: str,
         mode: str,
         output_dir: str = "",
+        options: dict[str, Any] | None = None,
     ) -> None:
         command_preview = ""
         emitted_artifacts: set[str] = set()
@@ -362,7 +368,8 @@ class SidecarWorker:
 
         try:
             command = _structured_command(platform, mode)
-            command_preview = _command_preview(command, targets)
+            command_args = _structured_command_args(command, targets, options or {})
+            command_preview = _command_preview(command, command_args)
             if self._fetch_lock.locked():
                 self._emit(
                     {
@@ -400,7 +407,7 @@ class SidecarWorker:
                     stdout_text, stderr_text = await asyncio.to_thread(
                         self._invoke_command_runner,
                         command,
-                        targets,
+                        command_args,
                         emit_stream_line,
                     )
                     log_lines = _split_log_lines(stdout_text, stderr_text)
@@ -616,6 +623,9 @@ class SidecarWorker:
         platforms = params.get("platforms") or []
         if isinstance(platforms, str):
             platforms = [platforms]
+        live = bool(params.get("live") or params.get("validate") or params.get("validate_live"))
+        if live:
+            return {"platforms": [_to_payload(self.login_service.status(str(platform), live=True)) for platform in platforms]}
         return {"platforms": [_to_payload(self.login_service.status(str(platform))) for platform in platforms]}
 
     def _import_login_sessions(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -763,6 +773,37 @@ def _structured_command(platform: str, mode: str) -> str:
     return command
 
 
+def _structured_command_args(command: str, targets: list[str], options: dict[str, Any]) -> list[str]:
+    args = list(targets)
+    if command != "reddit-so":
+        return args
+
+    sort = _option_string(options, "sort")
+    if sort:
+        args.extend(["--sort", sort])
+    time_range = _option_string(options, "time", "time_range", "timeRange")
+    if time_range and sort not in {"hot", "new"}:
+        args.extend(["--time", time_range])
+    limit = options.get("limit")
+    if limit not in (None, ""):
+        args.extend(["--limit", str(limit)])
+    subreddit = _option_string(options, "subreddit")
+    if subreddit:
+        args.extend(["--subreddit", subreddit])
+    save_posts = options.get("save_posts", options.get("savePosts"))
+    if save_posts is True or (isinstance(save_posts, str) and save_posts.lower() in {"1", "true", "yes", "on"}):
+        args.append("--save-posts")
+    return args
+
+
+def _option_string(options: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = options.get(key)
+        if value is not None:
+            return str(value).strip()
+    return ""
+
+
 def _command_preview(command: str, args: list[str]) -> str:
     return "feedgrab " + " ".join([command, *[_quote_cli_arg(arg) for arg in args]])
 
@@ -890,6 +931,9 @@ def _default_command_runner(command: str, args: list[str]) -> None:
         return
     if command == "zhihu-so":
         cli.cmd_zhihu_search(args)
+        return
+    if command == "reddit-so":
+        cli.cmd_reddit_search(args)
         return
     if command == "mpweixin-id":
         if not args:

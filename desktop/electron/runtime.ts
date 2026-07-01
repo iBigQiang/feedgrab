@@ -67,6 +67,7 @@ export function resolveFeedgrabRuntime(options: FeedgrabRuntimeOptions): Feedgra
     ...env,
     FEEDGRAB_DESKTOP_RUNTIME_ROOT: runtimeRoot,
     FEEDGRAB_WORKER_MODE: "true",
+    FEEDGRAB_DATA_DIR: installSessionsPath,
     FEEDGRAB_INSTALL_SESSIONS_DIR: bundledWorkerAvailable
       ? installSessionsPath
       : env.FEEDGRAB_INSTALL_SESSIONS_DIR || installSessionsPath,

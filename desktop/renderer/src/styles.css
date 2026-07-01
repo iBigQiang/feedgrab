@@ -144,10 +144,23 @@ button:disabled {
   color: #fff8eb;
 }
 
+.sidebar-footer {
+  display: grid;
+  margin-top: auto;
+  gap: 10px;
+}
+
+.sidebar-version {
+  color: #f0cf80;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
 .author-panel {
   display: grid;
   gap: 4px;
-  margin-top: auto;
+  margin-top: 0;
   padding: 14px 4px 0;
   border-top: 1px solid #4c473c;
 }
@@ -1320,7 +1333,7 @@ textarea + .inline-notice {
 .sponsor-table td {
   padding: 12px 14px;
   border: 1px solid #e0d8ca;
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .sponsor-logo-cell {
@@ -1340,13 +1353,16 @@ textarea + .inline-notice {
 }
 
 .sponsor-table strong {
-  display: block;
-  margin-bottom: 6px;
+  font-weight: 800;
 }
 
 .sponsor-table p {
   margin: 0;
   color: #5c5548;
+}
+
+.sponsor-table p + p {
+  margin-top: 18px;
 }
 
 .auth-bands {

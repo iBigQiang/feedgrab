@@ -120,6 +120,8 @@ class UniversalReader:
         # Reddit
         if ("reddit.com" in domain or domain.endswith(".reddit.com")
                 or domain == "redd.it" or domain.endswith(".redd.it")):
+            if path.startswith("/search") or re.match(r"^/r/[^/]+/search/?$", path):
+                return "reddit_search"
             return "reddit"
         # Medium (medium.com, *.medium.com)
         from feedgrab.fetchers.medium import is_medium_url
@@ -226,6 +228,10 @@ class UniversalReader:
         # XHS search notes batch mode: special flow, returns summary
         if platform == "xhs_search":
             return await self._read_search_notes(url)
+
+        # Reddit search URL mode: special flow, returns summary
+        if platform == "reddit_search":
+            return await self._read_reddit_search(url)
 
         try:
             content = await self._fetch(platform, url)
@@ -479,6 +485,23 @@ class UniversalReader:
                 raise RuntimeError("Reddit 抓取已禁用，请设置 REDDIT_ENABLED=true")
             from feedgrab.fetchers.reddit import fetch_reddit
             data = await fetch_reddit(url)
+            return from_reddit(data)
+
+        if platform == "reddit_search":
+            from feedgrab.config import reddit_enabled, reddit_search_enabled, reddit_search_limit
+            if not reddit_enabled() or not reddit_search_enabled():
+                raise RuntimeError("Reddit 搜索已禁用，请设置 REDDIT_ENABLED=true 且 REDDIT_SEARCH_ENABLED=true")
+            from feedgrab.fetchers.reddit import fetch_reddit_search, parse_reddit_url
+            kind, info = parse_reddit_url(url)
+            if kind != "search":
+                raise RuntimeError(f"不支持的 Reddit 搜索链接: {url}")
+            data = await fetch_reddit_search(
+                info.get("keyword", ""),
+                sort=info.get("sort", "relevance"),
+                time_range=info.get("time_range", "all"),
+                subreddit=info.get("subreddit", ""),
+                limit=reddit_search_limit(),
+            )
             return from_reddit(data)
 
         if platform == "weibo":
@@ -912,6 +935,31 @@ class UniversalReader:
             content=summary,
             url=url,
         )
+
+    async def _read_reddit_search(self, url: str) -> UnifiedContent:
+        """Fetch a Reddit search URL and save the summary artifact."""
+        from feedgrab.config import reddit_enabled, reddit_search_enabled, reddit_search_limit
+
+        if not reddit_enabled() or not reddit_search_enabled():
+            raise ValueError("Reddit 搜索已禁用，请设置 REDDIT_ENABLED=true 且 REDDIT_SEARCH_ENABLED=true")
+
+        from feedgrab.fetchers.reddit import fetch_reddit_search, parse_reddit_url
+        from feedgrab.utils.storage import save_to_markdown
+
+        kind, info = parse_reddit_url(url)
+        if kind != "search":
+            raise ValueError(f"不支持的 Reddit 搜索链接: {url}")
+        data = await fetch_reddit_search(
+            info.get("keyword", ""),
+            sort=info.get("sort", "relevance"),
+            time_range=info.get("time_range", "all"),
+            subreddit=info.get("subreddit", ""),
+            limit=reddit_search_limit(),
+        )
+        content = from_reddit(data)
+        saved_path = save_to_markdown(content)
+        setattr(content, "_feedgrab_saved_path", saved_path)
+        return content
 
     async def read_batch(self, urls: list[str]) -> list[UnifiedContent]:
         """Fetch multiple URLs concurrently."""

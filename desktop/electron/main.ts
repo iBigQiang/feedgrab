@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, session, shell, Tray } from "electron";
 import { spawn } from "node:child_process";
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { access, mkdir, stat, writeFile } from "node:fs/promises";
@@ -30,6 +30,8 @@ const appWindowIconPath = app.isPackaged
 const allowedOpenRoots = new Set<string>();
 const allowedOpenPaths = new Set<string>();
 let worker: PythonWorkerClient | undefined;
+let tray: Tray | undefined;
+let isQuitting = false;
 const chromeCdpProbeTimeoutMs = 1000;
 const chromeCdpStartupPollMs = 500;
 const chromeCdpStartupAttempts = 20;
@@ -204,6 +206,67 @@ function forwardWorkerEvent(event: FeedgrabWorkerEvent): void {
   }
 }
 
+function ensureTray(window: BrowserWindow): Tray {
+  if (tray) {
+    return tray;
+  }
+  tray = new Tray(loadAppWindowIcon());
+  tray.setToolTip("feedgrab 桌面版");
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: "显示主窗口",
+        click: () => showMainWindow(window)
+      },
+      {
+        label: "退出",
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        }
+      }
+    ])
+  );
+  tray.on("click", () => showMainWindow(window));
+  tray.on("double-click", () => showMainWindow(window));
+  return tray;
+}
+
+function showMainWindow(window: BrowserWindow): void {
+  if (window.isDestroyed()) {
+    return;
+  }
+  if (window.isMinimized()) {
+    window.restore();
+  }
+  window.show();
+  window.focus();
+}
+
+function handleMainWindowClose(event: Electron.Event, window: BrowserWindow): void {
+  if (isQuitting) {
+    return;
+  }
+  const choice = dialog.showMessageBoxSync(window, {
+    type: "question",
+    buttons: ["最小化到托盘", "直接退出", "取消"],
+    defaultId: 0,
+    cancelId: 2,
+    title: "关闭 feedgrab 桌面版",
+    message: "关闭窗口时要执行什么操作？",
+    detail: "最小化到托盘会继续保留当前应用；直接退出会关闭 feedgrab 桌面版。"
+  });
+  if (choice === 1) {
+    isQuitting = true;
+    return;
+  }
+  event.preventDefault();
+  if (choice === 0) {
+    ensureTray(window);
+    window.hide();
+  }
+}
+
 function createWindow(): void {
   smokeLog("creating browser window");
   const preload = path.join(__dirname, "preload.cjs");
@@ -223,6 +286,7 @@ function createWindow(): void {
     }
   });
 
+  window.on("close", (event) => handleMainWindowClose(event, window));
   registerSmokeDiagnostics(window);
 
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -677,7 +741,8 @@ function isValidFetchRequest(request: FetchRequest): boolean {
     hasTargets &&
       request.targets?.every((target) => typeof target === "string" && target.trim().length > 0) &&
       isSupportedPlatform(request.platform) &&
-      (request.mode === "search" || request.mode === "account")
+      (request.mode === "search" || request.mode === "account") &&
+      (request.options === undefined || isValidSettingsUpdate(request.options))
   );
 }
 
@@ -703,6 +768,7 @@ function isSupportedPlatform(value: unknown): value is SupportedPlatform {
       "bilibili",
       "wechat",
       "github",
+      "reddit",
       "linuxdo",
       "idcflare",
       "feishu",
@@ -760,12 +826,19 @@ void app.whenReady().then(async () => {
   createWindow();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    const windows = BrowserWindow.getAllWindows();
+    if (windows.length === 0) {
       createWindow();
+    } else {
+      showMainWindow(windows[0]);
     }
   });
 }).catch((error: unknown) => {
   smokeLog(`app startup failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+});
+
+app.on("before-quit", () => {
+  isQuitting = true;
 });
 
 app.on("window-all-closed", () => {

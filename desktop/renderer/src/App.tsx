@@ -26,11 +26,13 @@ import {
 import sponsorMarkdown from "../../../docs/sponsor.md?raw";
 import groupMarkdown from "../../group.md?raw";
 import appIconUrl from "../../../docs/feedgrab-icons/windows/app.ico?url";
+import desktopPackage from "../../package.json";
 
 const documentBaseUrl = "https://github.com/iBigQiang/feedgrab/tree/feedgrab-desktop/docs/";
 const documentRawBaseUrl = "https://raw.githubusercontent.com/iBigQiang/feedgrab/feedgrab-desktop/docs/";
 const proxiedDocumentRawBaseUrl = "https://edgeone.gh-proxy.com/https://raw.githubusercontent.com/iBigQiang/feedgrab/feedgrab-desktop/docs/";
 const markdownCacheTtlMs = 6 * 60 * 60 * 1000;
+const desktopVersion = typeof desktopPackage.version === "string" ? desktopPackage.version : "";
 
 const sponsorMarkdownConfig: RemoteMarkdownConfig = {
   remoteUrl: `${proxiedDocumentRawBaseUrl}sponsor.md`,
@@ -102,6 +104,7 @@ const fetchPlatformOptions: FetchPlatformOption[] = [
   { key: "youdao", id: "web", label: "有道云" },
   { key: "zhihu", id: "zhihu", label: "知乎", command: "zhihu-so", mode: "search" },
   { key: "zsxq", id: "zsxq", label: "知识星球" },
+  { key: "reddit", id: "reddit", label: "Reddit", command: "reddit-so", mode: "search" },
   { key: "xiaoyuzhou", id: "web", label: "小宇宙" },
   { key: "ximalaya", id: "web", label: "喜马拉雅" },
   { key: "rss", id: "web", label: "RSS" },
@@ -298,8 +301,15 @@ export function App(): ReactElement {
   }, [toast]);
 
   const fetchPlan = useMemo(
-    () => buildFetchPlan(urlText, selectedFetchPlatform, state.outputDirectory),
-    [urlText, selectedFetchPlatform, state.outputDirectory]
+    () =>
+      buildFetchPlan(
+        urlText,
+        selectedFetchPlatform,
+        state.outputDirectory,
+        state.settingsSchema,
+        state.pendingSettings
+      ),
+    [urlText, selectedFetchPlatform, state.outputDirectory, state.settingsSchema, state.pendingSettings]
   );
   const urls = fetchPlan.urls;
   const runningJobs = state.jobs.filter((job) => job.status === "running").length;
@@ -312,6 +322,13 @@ export function App(): ReactElement {
       dispatch({
         type: "job/log",
         payload: { level: "warning", message: fetchPlan.error ?? "请输入至少一个抓取目标" }
+      });
+      return;
+    }
+    if (Object.keys(state.pendingSettings).length > 0) {
+      dispatch({
+        type: "job/log",
+        payload: { level: "warning", message: "有未保存设置，请先保存设置后再开始抓取。" }
       });
       return;
     }
@@ -423,7 +440,7 @@ export function App(): ReactElement {
   }
 
   function loginPlatform(platform: SupportedPlatform): void {
-    showToast(`正在打开 ${platformLabel(platform)} 登录流程，登录成功后客户端会保存登录态。`, "info");
+    showToast(`正在打开 ${platformLabel(platform)} 登录流程，登录成功后请等待客户端提示已保存。`, "info");
     void api
       .loginPlatform(platform)
       .then((result) => {
@@ -521,44 +538,47 @@ export function App(): ReactElement {
             </button>
           ))}
         </nav>
-        <div className="author-panel">
-          <div className="author-row">
-            <span className="author-label">作者：</span>
-            <span className="author-value">强子手记</span>
-          </div>
-          <div className="author-row">
-            <span className="author-label">主页：</span>
-            <a className="author-text-link" href="https://x.com/iBigQiang" target="_blank" rel="noreferrer">
-              @iBigQiang
-            </a>
-          </div>
-          <div className="author-row">
-            <span className="author-label">推特：</span>
-            <span className="author-value author-social-value">
-              <a className="author-icon-link" href="https://x.com/iBigQiang" target="_blank" rel="noreferrer" aria-label="推特">
-                <span aria-hidden="true" className="author-link-icon">
-                  <SidebarIcon name="x" />
-                </span>
+        <div className="sidebar-footer">
+          {desktopVersion ? <div className="sidebar-version">版本号：v{desktopVersion}</div> : null}
+          <div className="author-panel">
+            <div className="author-row">
+              <span className="author-label">作者：</span>
+              <span className="author-value">强子手记</span>
+            </div>
+            <div className="author-row">
+              <span className="author-label">主页：</span>
+              <a className="author-text-link" href="https://x.com/iBigQiang" target="_blank" rel="noreferrer">
+                @iBigQiang
               </a>
-              <span>X</span>
-            </span>
-          </div>
-          <div className="author-row">
-            <span className="author-label">仓库：</span>
-            <span className="author-value author-social-value">
-              <a
-                className="author-icon-link"
-                href="https://github.com/iBigQiang/feedgrab/tree/feedgrab-desktop"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="仓库"
-              >
-                <span aria-hidden="true" className="author-link-icon">
-                  <SidebarIcon name="github" />
-                </span>
-              </a>
-              <span>GitHub</span>
-            </span>
+            </div>
+            <div className="author-row">
+              <span className="author-label">推特：</span>
+              <span className="author-value author-social-value">
+                <a className="author-icon-link" href="https://x.com/iBigQiang" target="_blank" rel="noreferrer" aria-label="推特">
+                  <span aria-hidden="true" className="author-link-icon">
+                    <SidebarIcon name="x" />
+                  </span>
+                </a>
+                <span>X</span>
+              </span>
+            </div>
+            <div className="author-row">
+              <span className="author-label">仓库：</span>
+              <span className="author-value author-social-value">
+                <a
+                  className="author-icon-link"
+                  href="https://github.com/iBigQiang/feedgrab/tree/feedgrab-desktop"
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="仓库"
+                >
+                  <span aria-hidden="true" className="author-link-icon">
+                    <SidebarIcon name="github" />
+                  </span>
+                </a>
+                <span>GitHub</span>
+              </span>
+            </div>
           </div>
         </div>
       </aside>
@@ -790,6 +810,7 @@ function LoginView(props: {
   importLoginSessions: (sourceDirectory?: string, platform?: SupportedPlatform) => void;
   loginPlatform: (platform: SupportedPlatform) => void;
 }): ReactElement {
+  const statuses = completeLoginStatuses(props.statuses);
   return (
     <section className="login-panel">
       <div className="panel-toolbar">
@@ -811,7 +832,7 @@ function LoginView(props: {
         )}
       </div>
       <div className="compact-grid">
-        {props.statuses.map((item) => (
+        {statuses.map((item) => (
           <article className="status-item login-status-item" key={item.platform}>
             <div>
               <strong>{item.label}</strong>
@@ -837,6 +858,55 @@ function LoginView(props: {
   );
 }
 
+const loginPlatformDefaults: Array<Pick<LoginStatus, "platform" | "label" | "status" | "loginRequired">> = [
+  { platform: "twitter", label: "X / Twitter", status: "missing", loginRequired: true },
+  { platform: "xhs", label: "小红书", status: "missing", loginRequired: true },
+  { platform: "wechat", label: "微信公众号", status: "missing", loginRequired: true },
+  { platform: "feishu", label: "飞书", status: "missing", loginRequired: true },
+  { platform: "kdocs", label: "金山文档", status: "missing", loginRequired: true },
+  { platform: "flowus", label: "FlowUs", status: "missing", loginRequired: true },
+  { platform: "reddit", label: "Reddit", status: "missing", loginRequired: true },
+  { platform: "zhihu", label: "知乎", status: "missing", loginRequired: true },
+  { platform: "linuxdo", label: "LinuxDo", status: "missing", loginRequired: true },
+  { platform: "idcflare", label: "IDCFlare", status: "missing", loginRequired: true },
+  { platform: "zsxq", label: "知识星球", status: "missing", loginRequired: true },
+  { platform: "github", label: "GitHub", status: "notRequired", loginRequired: false },
+  { platform: "youtube", label: "YouTube", status: "notRequired", loginRequired: false },
+  { platform: "bilibili", label: "Bilibili", status: "notRequired", loginRequired: false },
+  { platform: "web", label: "网页", status: "notRequired", loginRequired: false }
+];
+
+function completeLoginStatuses(statuses: LoginStatus[]): LoginStatus[] {
+  const byPlatform = new Map<SupportedPlatform, LoginStatus>();
+  for (const status of statuses) {
+    if (status.platform === "unknown") {
+      continue;
+    }
+    byPlatform.set(status.platform, status);
+  }
+  const now = new Date().toISOString();
+  for (const defaults of loginPlatformDefaults) {
+    if (!byPlatform.has(defaults.platform)) {
+      byPlatform.set(defaults.platform, {
+        platform: defaults.platform,
+        label: defaults.label,
+        status: defaults.status,
+        lastChecked: now,
+        loginRequired: defaults.loginRequired
+      });
+    }
+  }
+  const order = new Map(loginPlatformDefaults.map((item, index) => [item.platform, index]));
+  return [...byPlatform.values()].sort((left, right) => {
+    const leftOrder = order.get(left.platform) ?? 10_000;
+    const rightOrder = order.get(right.platform) ?? 10_000;
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
+    }
+    return left.label.localeCompare(right.label, "zh-Hans-CN");
+  });
+}
+
 function SettingsView(props: {
   settings?: SettingsSnapshot;
   settingsSchema?: SettingsSchema;
@@ -850,7 +920,8 @@ function SettingsView(props: {
   const [activePlatformId, setActivePlatformId] = useState("");
   const settings = props.settings;
   const schema = props.settingsSchema ?? settingsSchemaFromSnapshot(settings);
-  const activePlatform = schema.platforms.find((platform) => platform.id === activePlatformId) ?? schema.platforms[0];
+  const orderedPlatforms = orderSettingsPlatforms(schema.platforms);
+  const activePlatform = orderedPlatforms.find((platform) => platform.id === activePlatformId) ?? orderedPlatforms[0];
   const primaryBasicFields = schema.basic.filter((field) => !compactBasicSettingNames.has(field.name));
   const compactBasicFields = schema.basic.filter((field) => compactBasicSettingNames.has(field.name));
   const activePlatformGroups = activePlatform ? groupPlatformSettings(activePlatform) : [];
@@ -910,7 +981,7 @@ function SettingsView(props: {
       ) : (
         <div className="platform-settings-list" role="tabpanel">
           <div className="platform-subtabs" role="tablist" aria-label="平台设置菜单">
-            {schema.platforms.map((platform) => (
+            {orderedPlatforms.map((platform) => (
               <button
                 key={platform.id}
                 type="button"
@@ -1093,6 +1164,7 @@ const outputPlatformLabels = new Map<string, string>([
   ["youtube", "YouTube"],
   ["bilibili", "Bilibili"],
   ["github", "GitHub"],
+  ["reddit", "Reddit"],
   ["linuxdo", "LinuxDo"],
   ["idcflare", "IDCFlare"],
   ["feishu", "飞书"],
@@ -1245,13 +1317,12 @@ type RemoteMarkdownCache = {
 };
 
 type DocumentTableRow = {
-  title: string;
   href: string;
   imageSrc?: string;
   imageAlt?: string;
   logoWidth?: string;
   imageWidth?: string;
-  description: string;
+  paragraphs: string[];
 };
 
 type HtmlImageBlock = {
@@ -1410,6 +1481,19 @@ type PlatformSettingGroup = {
   fields: SettingsFieldSchema[];
 };
 
+function orderSettingsPlatforms(platforms: SettingsSchema["platforms"]): SettingsSchema["platforms"] {
+  const ordered = [...platforms];
+  const redditIndex = ordered.findIndex((platform) => platform.id === "reddit");
+  const zsxqIndex = ordered.findIndex((platform) => platform.id === "zsxq");
+  if (redditIndex < 0 || zsxqIndex < 0 || redditIndex === zsxqIndex + 1) {
+    return ordered;
+  }
+  const [reddit] = ordered.splice(redditIndex, 1);
+  const nextZsxqIndex = ordered.findIndex((platform) => platform.id === "zsxq");
+  ordered.splice(nextZsxqIndex + 1, 0, reddit);
+  return ordered;
+}
+
 const platformFieldOrder: Record<string, Record<string, number>> = {
   discourse: {
     LINUXDO_REPLY_MODE: 10,
@@ -1466,6 +1550,21 @@ const platformFieldOrder: Record<string, Record<string, number>> = {
     ZHIHU_SEARCH_LIMIT: 120,
     ZHIHU_SEARCH_SAVE_ANSWERS: 130,
     ZHIHU_SEARCH_DELAY: 140
+  },
+  reddit: {
+    REDDIT_ENABLED: 10,
+    REDDIT_CDP_ENABLED: 20,
+    REDDIT_PAGE_LOAD_TIMEOUT: 30,
+    REDDIT_MAX_COMMENTS: 40,
+    REDDIT_FETCH_ALL_COMMENTS: 50,
+    REDDIT_USER_AGENT: 60,
+    REDDIT_SUB_LIMIT: 70,
+    REDDIT_SUB_DELAY: 80,
+    REDDIT_SEARCH_SORT: 110,
+    REDDIT_SEARCH_TIME_RANGE: 120,
+    REDDIT_SEARCH_LIMIT: 130,
+    REDDIT_SEARCH_SAVE_POSTS: 140,
+    REDDIT_SEARCH_SUBREDDIT: 150
   }
 };
 
@@ -1559,6 +1658,9 @@ function platformSettingSectionLabel(platformId: string, fieldName: string): str
   }
   if (platformId === "discourse") {
     return fieldName.startsWith("IDCFLARE_") ? "IDCFlare" : "LinuxDo";
+  }
+  if (platformId === "reddit") {
+    return fieldName.startsWith("REDDIT_SEARCH_") ? "帖子搜索" : "单贴/评论抓取";
   }
   if (platformId === "feishu") {
     if (fieldName.startsWith("KDOCS_")) {
@@ -1797,7 +1899,7 @@ function settingsSchemaFromSnapshot(settings: SettingsSnapshot | undefined): Set
       { name: "LOCALIZE_MEDIA", label: "媒体本地化", type: "boolean", value: settings?.localizeMedia ?? false },
       { name: "FEEDGRAB_DATA_DIR", label: "登录态和数据目录", type: "path", value: resolvedDataDirectory },
       { name: "BROWSER_USER_AGENT", label: "浏览器 User-Agent", type: "string", value: browserPreviewUserAgent() },
-      { name: "CHROME_CDP_LOGIN", label: "优先从 Chrome CDP 提取登录态", type: "boolean", value: false },
+      { name: "CHROME_CDP_LOGIN", label: "登录时优先从 Chrome CDP 提取登录态", type: "boolean", value: false },
       { name: "CHROME_CDP_PORT", label: "Chrome CDP 端口", type: "number", value: 9222 },
       { name: "FORCE_REFETCH", label: "强制重新抓取", type: "boolean", value: false },
       { name: "FEEDGRAB_PROXY_ENABLED", label: "启用代理", type: "boolean", value: false },
@@ -1949,6 +2051,57 @@ function settingsSchemaFromSnapshot(settings: SettingsSnapshot | undefined): Set
         ]
       },
       {
+        id: "reddit",
+        label: "Reddit",
+        fields: [
+          { name: "REDDIT_ENABLED", label: "启用 Reddit 抓取", type: "boolean", value: true },
+          { name: "REDDIT_CDP_ENABLED", label: "Reddit 复用 Chrome CDP", type: "boolean", value: true },
+          { name: "REDDIT_PAGE_LOAD_TIMEOUT", label: "Reddit 页面等待毫秒", type: "number", value: 15000 },
+          { name: "REDDIT_MAX_COMMENTS", label: "评论最大条数", type: "number", value: 50 },
+          { name: "REDDIT_FETCH_ALL_COMMENTS", label: "抓取全部评论", type: "boolean", value: false },
+          { name: "REDDIT_USER_AGENT", label: "Reddit User-Agent", type: "string", value: "" },
+          { name: "REDDIT_SUB_LIMIT", label: "子版块抓取条数", type: "number", value: 25 },
+          { name: "REDDIT_SUB_DELAY", label: "子版块帖子间隔秒数", type: "number", value: 2 },
+          { name: "REDDIT_SEARCH_ENABLED", label: "启用 Reddit 帖子搜索", type: "boolean", value: true },
+          {
+            name: "REDDIT_SEARCH_SORT",
+            label: "帖子搜索排序",
+            type: "select",
+            value: "relevance",
+            options: [
+              { label: "相关性 relevance", value: "relevance" },
+              { label: "热门 hot", value: "hot" },
+              { label: "最受欢迎 top", value: "top" },
+              { label: "新 new", value: "new" },
+              { label: "评论计数 comments", value: "comments" }
+            ]
+          },
+          {
+            name: "REDDIT_SEARCH_TIME_RANGE",
+            label: "帖子搜索时间范围",
+            type: "select",
+            value: "all",
+            options: [
+              { label: "所有时间 all", value: "all" },
+              { label: "去年 year", value: "year" },
+              { label: "上个月 month", value: "month" },
+              { label: "上周 week", value: "week" },
+              { label: "今天 day", value: "day" },
+              { label: "过去 1 小时 hour", value: "hour" }
+            ]
+          },
+          { name: "REDDIT_SEARCH_LIMIT", label: "帖子搜索结果数", type: "number", value: 10 },
+          { name: "REDDIT_SEARCH_SAVE_POSTS", label: "搜索后深抓单贴", type: "boolean", value: false },
+          {
+            name: "REDDIT_SEARCH_SUBREDDIT",
+            label: "限定子版块",
+            type: "string",
+            value: "",
+            placeholder: "ChatGPT（留空表示全站）"
+          }
+        ]
+      },
+      {
         id: "feishu",
         label: "文档平台",
         fields: [
@@ -2032,7 +2185,11 @@ function settingsSchemaFromSnapshot(settings: SettingsSnapshot | undefined): Set
       },
       { id: "rss", label: "RSS", fields: [] },
       { id: "web", label: "任意网页", fields: [] },
-      { id: "zsxq", label: "知识星球", fields: [] },
+      {
+        id: "zsxq",
+        label: "知识星球",
+        fields: []
+      },
       {
         id: "media_ai",
         label: "媒体 / API",
@@ -2088,7 +2245,17 @@ function mergeLoginStatuses(current: LoginStatus[], updates: LoginStatus[]): Log
   return [...byPlatform.values()];
 }
 
-function buildFetchPlan(text: string, selectedPlatformKey: SelectedFetchPlatform, outputDirectory: string): FetchPlan {
+const redditSearchSorts = new Set(["relevance", "hot", "top", "new", "comments"]);
+const redditSearchTimeRanges = new Set(["all", "year", "month", "week", "day", "hour"]);
+const redditSearchSortsWithTime = new Set(["relevance", "top", "comments"]);
+
+function buildFetchPlan(
+  text: string,
+  selectedPlatformKey: SelectedFetchPlatform,
+  outputDirectory: string,
+  settingsSchema?: SettingsSchema,
+  pendingSettings: Record<string, SettingsFieldValue> = {}
+): FetchPlan {
   const lines = parseTargetLines(text);
   const urls = lines.filter(isHttpUrl);
   const emptyRequest: FetchRequest = { urls: [], outputDirectory };
@@ -2132,21 +2299,118 @@ function buildFetchPlan(text: string, selectedPlatformKey: SelectedFetchPlatform
       error: `${option.label} 暂不支持直接输入关键词或账号`
     };
   }
-  const commandPreview = `feedgrab ${option.command} ${lines.map(quoteCliArg).join(" ")}`;
+  const structuredArgs = buildStructuredFetchArgs(option, lines, settingsSchema, pendingSettings);
+  const commandPreview = `feedgrab ${option.command} ${structuredArgs.commandArgs.join(" ")}`;
+  const request: FetchRequest = {
+    urls: [],
+    targets: lines,
+    platform: option.id,
+    mode: option.mode,
+    commandPreview,
+    outputDirectory
+  };
+  if (structuredArgs.options) {
+    request.options = structuredArgs.options;
+  }
   return {
     urls: [],
     targets: lines,
     valid: true,
     commandPreview,
-    request: {
-      urls: [],
-      targets: lines,
-      platform: option.id,
-      mode: option.mode,
-      commandPreview,
-      outputDirectory
-    }
+    request
   };
+}
+
+function buildStructuredFetchArgs(
+  option: FetchPlatformOption,
+  lines: string[],
+  settingsSchema: SettingsSchema | undefined,
+  pendingSettings: Record<string, SettingsFieldValue>
+): { commandArgs: string[]; options?: Record<string, SettingsFieldValue> } {
+  if (option.id !== "reddit" || option.command !== "reddit-so") {
+    return { commandArgs: lines.map(quoteCliArg) };
+  }
+  const options = buildRedditSearchOptions(settingsSchema, pendingSettings);
+  const commandArgs = lines.map(quoteCliArg);
+  commandArgs.push("--sort", quoteCliArg(String(options.sort)));
+  if (typeof options.time === "string") {
+    commandArgs.push("--time", quoteCliArg(options.time));
+  }
+  commandArgs.push("--limit", quoteCliArg(String(options.limit)));
+  if (typeof options.subreddit === "string" && options.subreddit.trim().length > 0) {
+    commandArgs.push("--subreddit", quoteCliArg(options.subreddit));
+  }
+  if (options.savePosts === true) {
+    commandArgs.push("--save-posts");
+  }
+  return { commandArgs, options };
+}
+
+function buildRedditSearchOptions(
+  settingsSchema: SettingsSchema | undefined,
+  pendingSettings: Record<string, SettingsFieldValue>
+): Record<string, SettingsFieldValue> {
+  const sort = normalizeStringChoice(
+    settingString("REDDIT_SEARCH_SORT", settingsSchema, pendingSettings, "relevance"),
+    redditSearchSorts,
+    "relevance"
+  );
+  const time = normalizeStringChoice(
+    settingString("REDDIT_SEARCH_TIME_RANGE", settingsSchema, pendingSettings, "all"),
+    redditSearchTimeRanges,
+    "all"
+  );
+  const limit = normalizePositiveInteger(settingValue("REDDIT_SEARCH_LIMIT", settingsSchema, pendingSettings), 10);
+  const subreddit = settingString("REDDIT_SEARCH_SUBREDDIT", settingsSchema, pendingSettings, "").trim();
+  const savePosts = settingBooleanValue(settingValue("REDDIT_SEARCH_SAVE_POSTS", settingsSchema, pendingSettings));
+  const options: Record<string, SettingsFieldValue> = { sort, limit };
+  if (redditSearchSortsWithTime.has(sort)) {
+    options.time = time;
+  }
+  if (subreddit.length > 0) {
+    options.subreddit = subreddit;
+  }
+  if (savePosts) {
+    options.savePosts = true;
+  }
+  return options;
+}
+
+function settingValue(
+  name: string,
+  settingsSchema: SettingsSchema | undefined,
+  pendingSettings: Record<string, SettingsFieldValue>
+): SettingsFieldValue | undefined {
+  if (Object.prototype.hasOwnProperty.call(pendingSettings, name)) {
+    return pendingSettings[name];
+  }
+  for (const platform of settingsSchema?.platforms ?? []) {
+    const field = platform.fields.find((item) => item.name === name);
+    if (field) {
+      return field.value ?? field.defaultValue;
+    }
+  }
+  return undefined;
+}
+
+function settingString(
+  name: string,
+  settingsSchema: SettingsSchema | undefined,
+  pendingSettings: Record<string, SettingsFieldValue>,
+  fallback: string
+): string {
+  const value = settingValue(name, settingsSchema, pendingSettings);
+  return value === undefined || value === null ? fallback : String(value);
+}
+
+function normalizeStringChoice(value: string, allowedValues: Set<string>, fallback: string): string {
+  const normalized = value.trim().toLowerCase();
+  return allowedValues.has(normalized) ? normalized : fallback;
+}
+
+function normalizePositiveInteger(value: SettingsFieldValue | undefined, fallback: number): number {
+  const numberValue = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(numberValue) && numberValue > 0 ? Math.floor(numberValue) : fallback;
 }
 
 function parseTargetLines(text: string): string[] {
@@ -2211,7 +2475,7 @@ function renderMarkdownBlocks(markdown: string, config: RemoteMarkdownConfig): R
     if (tableBlock) {
       const tableRows = extractDocumentTableRows(tableBlock.markdown, config.defaultImageAlt);
       if (tableRows.length) {
-        blocks.push(renderDocumentTable(tableRows, config.tableAriaLabel, `table-${index}`));
+        blocks.push(renderDocumentTable(tableRows, config.tableAriaLabel, config.defaultImageAlt, `table-${index}`));
         index = tableBlock.endIndex;
         continue;
       }
@@ -2291,7 +2555,7 @@ function collectDocumentTableBlock(lines: string[], startIndex: number): { markd
   return undefined;
 }
 
-function renderDocumentTable(rows: DocumentTableRow[], ariaLabel: string, key: string): ReactElement {
+function renderDocumentTable(rows: DocumentTableRow[], ariaLabel: string, defaultImageAlt: string, key: string): ReactElement {
   return (
     <div className="sponsor-table-wrap" key={key}>
       <table className="sponsor-table" aria-label={ariaLabel}>
@@ -2304,13 +2568,14 @@ function renderDocumentTable(rows: DocumentTableRow[], ariaLabel: string, key: s
                 <td className="sponsor-logo-cell" style={cellStyle}>
                   {row.imageSrc ? (
                     <a href={row.href} target="_blank" rel="noreferrer" className="sponsor-logo-link">
-                      <img src={row.imageSrc} alt={row.imageAlt || row.title} style={imageStyle} />
+                      <img src={row.imageSrc} alt={row.imageAlt || defaultImageAlt} style={imageStyle} />
                     </a>
                   ) : null}
                 </td>
                 <td>
-                  <strong>{row.title}</strong>
-                  <p>{renderInlineMarkdown(row.description)}</p>
+                  {row.paragraphs.map((paragraph, paragraphIndex) => (
+                    <p key={`${row.href}-${index}-paragraph-${paragraphIndex}`}>{renderInlineMarkdown(paragraph)}</p>
+                  ))}
                 </td>
               </tr>
             );
@@ -2435,18 +2700,17 @@ function extractDocumentTableRows(markdown: string, defaultTitle: string): Docum
       const imageAlt = stripHtml(decodeHtmlEntities(extractHtmlAttribute(imageCell, "alt")));
       const logoWidth = normalizeSponsorWidth(extractHtmlAttribute(imageCellAttributes, "width"));
       const imageWidth = normalizeSponsorWidth(extractHtmlAttribute(imageCell, "width"));
-      const description = stripHtmlPreservingLinks(textCell);
+      const paragraphs = extractHtmlCellParagraphs(textCell);
       return {
-        title: imageAlt || defaultTitle,
         href,
         imageSrc: imageSrc ?? undefined,
         imageAlt,
         logoWidth,
         imageWidth,
-        description
+        paragraphs: paragraphs.length ? paragraphs : [defaultTitle]
       };
     })
-    .filter((row) => row.description || row.imageSrc);
+    .filter((row) => row.paragraphs.length || row.imageSrc);
 }
 
 function normalizeSponsorWidth(value: string): string | undefined {
@@ -2467,12 +2731,21 @@ function extractHtmlAttribute(html: string, attribute: string): string {
   return match?.[1] ?? "";
 }
 
-function stripHtmlPreservingLinks(html: string): string {
-  const withMarkdownLinks = html.replace(/<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_, href: string, label: string) => {
-    const safeHref = safeLinkUrl(href);
-    return safeHref ? `[${stripHtml(label)}](${safeHref})` : stripHtml(label);
-  });
-  return stripHtml(decodeHtmlEntities(withMarkdownLinks)).replace(/\s+/g, " ").trim();
+function extractHtmlCellParagraphs(html: string): string[] {
+  const withInlineMarkdown = html
+    .replace(/<br\s*\/?>\s*<br\s*\/?>/gi, "\n\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<p(?:\s[^>]*)?>/gi, "")
+    .replace(/<(strong|b)>([\s\S]*?)<\/\1>/gi, (_, _tag: string, content: string) => `**${stripHtml(content)}**`)
+    .replace(/<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_, href: string, label: string) => {
+      const safeHref = safeLinkUrl(href);
+      return safeHref ? `[${stripHtml(label)}](${safeHref})` : stripHtml(label);
+    });
+  return decodeHtmlEntities(stripHtml(withInlineMarkdown))
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.replace(/[ \t]*\n[ \t]*/g, " ").replace(/[ \t]+/g, " ").trim())
+    .filter(Boolean);
 }
 
 function stripHtml(value: string): string {
@@ -2557,6 +2830,7 @@ function platformLabel(platform: SupportedPlatform): string {
     bilibili: "Bilibili",
     wechat: "微信公众号",
     github: "GitHub",
+    reddit: "Reddit",
     linuxdo: "LinuxDo",
     idcflare: "IDCFlare",
     feishu: "飞书",
@@ -2572,6 +2846,7 @@ function platformLabel(platform: SupportedPlatform): string {
 
 function detectPlatform(url: string): SupportedPlatform {
   if (/github\.com/i.test(url)) return "github";
+  if (/reddit\.com|redd\.it/i.test(url)) return "reddit";
   if (/x\.com|twitter\.com/i.test(url)) return "twitter";
   if (/xiaohongshu\.com/i.test(url)) return "xhs";
   if (/youtube\.com|youtu\.be/i.test(url)) return "youtube";
@@ -2747,6 +3022,7 @@ function createFallbackApi(): FeedgrabIpcApi {
         { platform: "feishu", label: "飞书", status: "missing", lastChecked: now },
         { platform: "kdocs", label: "金山文档", status: "missing", lastChecked: now },
         { platform: "flowus", label: "FlowUs", status: "missing", lastChecked: now },
+        { platform: "reddit", label: "Reddit", status: "missing", lastChecked: now },
         { platform: "zhihu", label: "知乎", status: "missing", lastChecked: now },
         { platform: "linuxdo", label: "LinuxDo", status: "connected", lastChecked: now },
         { platform: "idcflare", label: "IDCFlare", status: "missing", lastChecked: now },
@@ -2760,7 +3036,7 @@ function createFallbackApi(): FeedgrabIpcApi {
     },
     importLoginSessions(sourceDirectory, platform) {
       const sourceRoot = sourceDirectory || "D:\\AiCode\\feedgrab\\desktop\\sessions";
-      const platforms = platform ? [platform] : ["twitter", "xhs", "wechat", "linuxdo"];
+      const platforms = platform ? [platform] : ["twitter", "xhs", "wechat", "linuxdo", "reddit"];
       return Promise.resolve({
         ok: true,
         sourceDirectory: sourceRoot,

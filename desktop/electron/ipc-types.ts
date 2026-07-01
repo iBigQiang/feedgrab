@@ -5,6 +5,7 @@ export type SupportedPlatform =
   | "bilibili"
   | "wechat"
   | "github"
+  | "reddit"
   | "linuxdo"
   | "idcflare"
   | "feishu"
@@ -27,6 +28,7 @@ export type FetchRequest = {
   targets?: string[];
   platform?: SupportedPlatform | "auto";
   mode?: FetchMode;
+  options?: Record<string, SettingsFieldValue>;
   commandPreview?: string;
   outputDirectory: string;
 };

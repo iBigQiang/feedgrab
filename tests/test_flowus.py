@@ -2,6 +2,8 @@
 """FlowUs fetcher tests."""
 
 import asyncio
+import sys
+import types
 
 from feedgrab.fetchers import flowus
 from feedgrab.fetchers.flowus import _BT_MEDIA, _BT_PAGE, _walk_blocks
@@ -62,6 +64,47 @@ def test_flowus_local_mode_keeps_attachment_path_and_download_info():
             "filename": "000_image.png",
         }
     ]
+
+
+def test_connect_flowus_cdp_does_not_persist_incomplete_auth_cookies(monkeypatch, tmp_path):
+    class FakePage:
+        pass
+
+    class FakeContext:
+        async def cookies(self):
+            return [
+                {"name": "locale", "value": "zh-CN", "domain": ".flowus.cn"},
+                {"name": "next_lng", "value": "zh", "domain": ".flowus.cn"},
+            ]
+
+        async def new_page(self):
+            return FakePage()
+
+    class FakeBrowser:
+        contexts = [FakeContext()]
+
+    class FakeChromium:
+        async def connect_over_cdp(self, _ws_url):
+            return FakeBrowser()
+
+    class FakePlaywright:
+        chromium = FakeChromium()
+
+    class FakeAsyncPlaywright:
+        async def start(self):
+            return FakePlaywright()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "playwright.async_api",
+        types.SimpleNamespace(async_playwright=lambda: FakeAsyncPlaywright()),
+    )
+    monkeypatch.setattr("feedgrab.config.get_session_dir", lambda: tmp_path)
+
+    result = asyncio.run(flowus._connect_flowus_cdp("https://flowus.cn/share/test"))
+
+    assert result is not None
+    assert not (tmp_path / "flowus.json").exists()
 
 
 def test_fetch_flowus_remote_mode_resolves_signed_online_image_url(monkeypatch):

@@ -44,13 +44,12 @@ A2D02AFEF94801300832A310E28153ED2E9B40C92AB271B42C5528EA1DD1934E
 - `Obsidian Vault`：可选，高优先级；安装初始留空，填写后会优先作为 Markdown 输出根目录。
 - `登录态和数据目录`：保存 cookie/session 数据的位置。安装版首次默认指向安装根目录的 `sessions`，例如 `D:\feedgrab Desktop\sessions`。安装包会带空白模板文件，真实登录信息不会内置。
 - `浏览器 User-Agent`：默认自动从当前环境读取，也可以手动覆盖。
-- `优先从 Chrome CDP 提取登录态`：用于复用或启动带 CDP 端口的本机 Chrome。点击平台“登录”时会先走 CDP 抽取/登录并保存到当前 `登录态和数据目录`，如果 CDP 连接或抽取失败，再回退到普通 Playwright 登录窗口。
 - `Chrome CDP 端口`：默认 `9222`，客户端会尽量自动检测和启动可用端口。
 - `启用代理` / `代理地址` / `不走代理地址`：默认关闭；代理地址支持 `http://127.0.0.1:7890`、`socks5://127.0.0.1:7890`、`http://用户名:密码@IP:端口`，密码会在界面和日志中隐藏。不走代理地址默认 `127.0.0.1,localhost`，避免本地 worker、CDP 端口和客户端内部服务被代理干扰。
 
 保存代理设置后，客户端会把代理注入 Python sidecar worker 的 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY` 环境变量，并用于 Python HTTP 抓取、Playwright 新启动浏览器和在线赞助/社群文档加载。若选择复用 Chrome CDP，客户端不会强行改 Chrome 代理，而是继承用户已打开 Chrome 的代理或 VPN 状态。
 
-平台级参数在“设置 → 平台设置”中维护，按 X/Twitter、小红书、微信公众号、Discourse 论坛、文档平台、视频播客、知乎、Telegram、RSS、任意网页、知识星球、媒体/API 等分类展示。
+“基础设置”里提供全局“登录时优先从 Chrome CDP 提取登录态”开关：勾选时，所有平台点击“登录”都会优先从当前 Chrome 抽取 cookie，适合单账号；不勾选时，点击具体平台“登录”会打开隔离登录窗口，由用户手动登录，并保持窗口打开直到客户端提示登录态已保存，适合保存多账号。平台级参数仍在“设置 → 平台设置”中维护，按 X/Twitter、小红书、微信公众号、Discourse 论坛、文档平台、视频播客、知乎、Telegram、RSS、任意网页、知识星球、媒体/API 等分类展示。
 
 ## 登录态与 sessions
 
@@ -58,7 +57,7 @@ A2D02AFEF94801300832A310E28153ED2E9B40C92AB271B42C5528EA1DD1934E
 
 1. 检测当前客户端已保存的登录态。
 2. 从安装目录或本地 `sessions` 目录导入 JSON cookie 文件。
-3. 点击单个平台“登录”，打开浏览器，由用户完成登录后保存状态。
+3. 点击单个平台“登录”：若基础设置已勾选“登录时优先从 Chrome CDP 提取登录态”，客户端直接抽取当前 Chrome 登录态；若未勾选，则打开隔离登录窗口，由用户完成登录，并等待客户端提示登录态已保存后再关闭窗口。
 
 安装包不再直接把模板写入安装根目录，而是把 `desktop/session-templates/` 以 `extraResources` 打包到安装资源目录，并在启动时按以下规则补齐到 `FEEDGRAB_DATA_DIR`：
 
