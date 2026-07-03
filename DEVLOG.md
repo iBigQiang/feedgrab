@@ -2,6 +2,40 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-07-03 · v0.26.5-dev · 桌面端 0.1.14 X/Twitter Article 搜索覆盖优化发布
+
+### 背景
+
+`feedgrab-desktop` 分支针对 X/Twitter 关键词搜索做小迭代，目标是在搜索中文关键词时尽可能覆盖更多 Article 长文结果，并改善搜索汇总表中 Article 行的摘要显示质量。主分支 `main` 本轮不改动。
+
+### 实施
+
+- 桌面端安装包版本递增到 `0.1.14`，重新生成普通用户 NSIS 安装器。
+- X/Twitter 关键词搜索新增 `全部 zh+zxx` 语言选项，覆盖中文普通推文和 `lang:zxx` 的 Article 长文卡片。
+- X/Twitter 关键词搜索新增 `全量 Live+Top` 排序选项，同时搜索 Latest 和 Top 后合并去重。
+- 英文关键词默认扩展大小写组合，例如 `WorkBuddy` 会覆盖 `WorkBuddy`、`Workbuddy`、`workbuddy`。
+- 搜索结果合并后按查看数重新排序，再应用最大结果数，减少高浏览 Article 被截断的概率。
+- 搜索汇总表的 Article 摘要优先显示长文标题，其次显示长文正文开头，最后才回退到外层推文文本。
+- 桌面端 X/Twitter 设置页同步新增以上搜索语言和排序选项。
+- GitHub Release notes 使用中文完整说明，并回填真实 `browser_download_url`。
+
+### 验证结果
+
+- `desktop`: `npm test`：82 passed。
+- `desktop`: `npm run lint`：通过。
+- `desktop`: `npm run build`：通过。
+- `python -m pytest tests/test_service_desktop.py tests/test_worker_protocol.py tests/test_service_layer.py tests/test_twitter_keyword_search.py -q -p no:cacheprovider`：110 passed。
+- `desktop`: `npm run pack:user`：成功生成 `D:\AiCode\feedgrab\desktop\release-packages\20260703-123302\feedgrab Desktop Setup 0.1.14.exe`。
+- 安装包大小：`376915729` bytes。
+- 安装包 SHA256：`63A67DD51F09FB27A64F76D1005D022CFBD3B9E86C6EE5C0290B2351D65557B8`。
+- 安装包签名状态：未签名。
+- GitHub Release：`desktop-v0.1.14-20260703`，asset `feedgrab-desktop-setup-0.1.14.exe` 已上传。
+- 下载地址核验：GitHub API 返回的 `browser_download_url` 为 `https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.14-20260703/feedgrab-desktop-setup-0.1.14.exe`，`curl.exe -I -L` 最终返回 `200 OK`，`Content-Length: 376915729`。
+
+### 状态：已完成 ✅
+
+---
+
 ## 2026-07-01 · v0.26.4-dev · 桌面端 0.1.13 阶段性收尾发布
 
 ### 背景
