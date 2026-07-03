@@ -428,9 +428,9 @@ def x_search_min_retweets() -> int:
 
 
 def x_search_sort() -> str:
-    """Default search sort mode: 'live' (Latest) or 'top' (Top). Default: live."""
+    """Default search sort mode: 'live', 'top', or 'all'. Default: live."""
     val = os.getenv("X_SEARCH_SORT", "live").strip().lower()
-    return val if val in ("live", "top") else "live"
+    return val if val in ("live", "top", "all") else "live"
 
 
 def x_search_exclude_retweets() -> bool:

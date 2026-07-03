@@ -230,6 +230,44 @@ def test_cli_twitter_search_merge_writes_empty_summary(monkeypatch, tmp_path, ca
     assert "*未找到结果。*" in merged_files[0].read_text(encoding="utf-8")
 
 
+def test_cli_twitter_search_merge_uses_all_sort_output_dir(monkeypatch, tmp_path, capsys):
+    import feedgrab.cli as cli
+    import feedgrab.config as config
+    import feedgrab.fetchers.twitter_keyword_search as search_module
+
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+    monkeypatch.delenv("OBSIDIAN_VAULT", raising=False)
+    monkeypatch.setattr(config, "x_search_enabled", lambda: True)
+    monkeypatch.setattr(config, "x_search_lang", lambda: "zh+zxx")
+    monkeypatch.setattr(config, "x_search_days", lambda: 3)
+    monkeypatch.setattr(config, "x_search_min_faves", lambda: 0)
+    monkeypatch.setattr(config, "x_search_min_retweets", lambda: 0)
+    monkeypatch.setattr(config, "x_search_sort", lambda: "all")
+    monkeypatch.setattr(config, "x_search_exclude_retweets", lambda: True)
+    monkeypatch.setattr(config, "x_search_delay", lambda: 0)
+    monkeypatch.setattr(config, "x_search_max_results", lambda: 10)
+    monkeypatch.setattr(config, "x_search_save_tweets", lambda: False)
+    monkeypatch.setattr(config, "x_search_merge_keywords", lambda: True)
+
+    async def empty_search(**kwargs):
+        return {
+            "total": 0,
+            "saved": 0,
+            "query": kwargs["keyword"],
+            "output_path": "",
+            "csv_path": "",
+            "tweets": [],
+        }
+
+    monkeypatch.setattr(search_module, "search_twitter_keyword", empty_search)
+
+    cli.cmd_twitter_search(["alpha,beta"])
+
+    capsys.readouterr()
+    assert list(tmp_path.glob("X/search/3day_all/alpha+beta_*.md"))
+    assert not list(tmp_path.glob("X/search/3day_hot/alpha+beta_*.md"))
+
+
 def test_mcp_read_url_uses_fetch_service(monkeypatch):
     _install_fake_mcp(monkeypatch)
 

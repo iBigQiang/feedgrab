@@ -105,6 +105,50 @@ Release asset 文件名使用无空格、稳定、可复制的名称：
 feedgrab-desktop-setup-<desktop-package-version>.exe
 ```
 
+GitHub Release 介绍信息必须用中文写全，不要只写一句英文占位说明。Release notes 至少包含：
+
+- 版本标题，例如 `feedgrab Desktop v0.1.13 阶段性测试版`
+- 适用分支和版本性质，明确这是 `feedgrab-desktop` 分支的 Windows 桌面客户端预览安装包
+- 下载信息：安装包文件名、真实下载地址、Release tag、目标分支、文件大小、SHA256、签名状态、打包时间
+- 本版主要修复或新增功能，按用户可理解的中文条目列出
+- 已运行的验证命令和结果，包括桌面端 test/lint/build、必要的 Python 测试、Release asset URL 核验
+- 说明安装包不包含真实 Cookie、Token、API Key 或用户登录态
+
+推荐先准备中文 notes 文本，将占位符替换为实际值后再传给 `gh release create` / `gh release edit`。为了保留 Markdown 反引号，建议使用 PowerShell 单引号 here-string：
+
+```powershell
+$notes = @'
+## feedgrab Desktop v<desktopVersion> 阶段性测试版
+
+这是 `feedgrab-desktop` 分支的 Windows 桌面客户端预览安装包，适合继续做客户端安装、登录态、多账号、抓取和卸载保留数据测试。本次安装包只发布普通用户版 NSIS 安装器，源码分支不提交 `.exe` 二进制产物。
+
+### 下载信息
+
+- Windows 安装包：`<assetName>`
+- 下载地址：<发布后用 GitHub API 返回的 browser_download_url 回填>
+- Release tag：`<tag>`
+- 目标分支：`feedgrab-desktop`
+- 文件大小：<安装包 bytes>
+- SHA256：<安装包 SHA256>
+- 签名状态：<已签名/未签名>
+- 打包时间：<本地打包时间 +08:00>
+
+### 本版主要修复
+
+- <用中文列出本版用户可感知的修复或新增功能>
+
+### 已做验证
+
+- 桌面端：`npm test`、`npm run lint`、`npm run build`
+- Python：<如涉及 service / worker，写入实际 pytest 命令和结果>
+- Release asset：通过 GitHub API 获取真实 `browser_download_url`，并用 `curl.exe -I -L` 核验最终不是 404。
+
+### 说明
+
+本安装包仍是桌面端预览版本，不是 main 分支正式 CLI 发布。安装包不包含任何真实 Cookie、Token、API Key 或用户登录态；真实登录信息只会保存到用户设置的 `登录态和数据目录`。
+'@
+```
+
 先提交并推送当前分支上的代码和文档基础更新，确保 GitHub Release tag 可以指向远端已有提交；仍然只推送当前分支：
 
 ```powershell
@@ -126,7 +170,7 @@ gh release create $tag `
   --repo iBigQiang/feedgrab `
   --target feedgrab-desktop `
   --title "feedgrab Desktop v$desktopVersion $releaseDate" `
-  --notes "feedgrab Desktop preview installer for feedgrab-desktop branch." `
+  --notes "$notes" `
   "$installer#$assetName"
 ```
 
@@ -155,6 +199,7 @@ curl.exe -I -L $url
 - 返回的 URL 必须是 GitHub Release asset 的真实 `browser_download_url`。
 - `curl.exe -I -L` 需要能正常跟随跳转，最终不是 404。
 - 如果 Release 是 draft，先发布后再声称这是公开下载地址。
+- 获取真实 `$url` 后，必须把 Release notes 中的下载地址占位符替换为该 `$url`，并运行 `gh release edit $tag --notes "$notes"` 更新 GitHub Release 页面，确保 <https://github.com/iBigQiang/feedgrab/releases> 上展示的是中文完整说明而不是英文占位说明。
 
 ## 6. 更新桌面端 README 和发布文档
 

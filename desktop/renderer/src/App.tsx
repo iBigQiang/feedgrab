@@ -1941,6 +1941,7 @@ function settingsSchemaFromSnapshot(settings: SettingsSnapshot | undefined): Set
             value: "zh",
             options: [
               { label: "不限", value: "" },
+              { label: "全部 zh+zxx", value: "zh+zxx" },
               { label: "中文 zh", value: "zh" },
               { label: "英文 en", value: "en" },
               { label: "日文 ja", value: "ja" }
@@ -1954,7 +1955,8 @@ function settingsSchemaFromSnapshot(settings: SettingsSnapshot | undefined): Set
             value: "live",
             options: [
               { label: "最新 live", value: "live" },
-              { label: "热门 top", value: "top" }
+              { label: "热门 top", value: "top" },
+              { label: "全量 Live+Top", value: "all" }
             ]
           },
           {

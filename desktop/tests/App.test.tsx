@@ -37,7 +37,7 @@ describe("App", () => {
     expect(screen.getByText("赞助")).toBeInTheDocument();
     expect(screen.getByText("社群")).toBeInTheDocument();
     expect(screen.queryByText("授权")).not.toBeInTheDocument();
-    expect(screen.getByText("版本号：v0.1.13")).toBeInTheDocument();
+    expect(screen.getByText("版本号：v0.1.14")).toBeInTheDocument();
     expect(screen.getByText("强子手记").closest(".author-row")).toHaveTextContent("作者：强子手记");
     expect(screen.getByRole("link", { name: "@iBigQiang" })).toHaveAttribute("href", "https://x.com/iBigQiang");
     expect(screen.queryByText("商业化 GUI 客户端分支")).not.toBeInTheDocument();

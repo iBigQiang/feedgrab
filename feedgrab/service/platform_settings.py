@@ -168,6 +168,7 @@ PLATFORM_SETTINGS_SCHEMA = PlatformSettingsSchema(
                     "zh",
                     options=(
                         {"label": "不限", "value": ""},
+                        {"label": "全部 zh+zxx", "value": "zh+zxx"},
                         {"label": "中文 zh", "value": "zh"},
                         {"label": "英文 en", "value": "en"},
                         {"label": "日文 ja", "value": "ja"},
@@ -185,6 +186,7 @@ PLATFORM_SETTINGS_SCHEMA = PlatformSettingsSchema(
                     options=(
                         {"label": "最新 live", "value": "live"},
                         {"label": "热门 top", "value": "top"},
+                        {"label": "全量 Live+Top", "value": "all"},
                     ),
                 ),
                 PlatformSettingField("X_SEARCH_EXCLUDE_RETWEETS", "boolean", "排除转推", "x", True),

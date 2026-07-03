@@ -52,6 +52,65 @@ from feedgrab.fetchers.twitter import _clean_title
 # Query building
 # ---------------------------------------------------------------------------
 
+def _strip_wrapping_quotes(text: str) -> str:
+    text = text.strip()
+    if len(text) >= 2 and text.startswith('"') and text.endswith('"'):
+        return text[1:-1].strip()
+    return text
+
+
+def _quote_search_term(text: str) -> str:
+    escaped = text.strip().replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _case_variants(keyword: str) -> List[str]:
+    """Return conservative case variants for ASCII keywords."""
+    base = _strip_wrapping_quotes(keyword)
+    if not re.search(r"[A-Za-z]", base):
+        return [base]
+
+    variants = [base, base.capitalize(), base.lower()]
+    result = []
+    seen = set()
+    for variant in variants:
+        if variant and variant not in seen:
+            seen.add(variant)
+            result.append(variant)
+    return result
+
+
+def _keyword_expression(keyword: str) -> str:
+    variants = [_quote_search_term(variant) for variant in _case_variants(keyword)]
+    if len(variants) == 1:
+        return variants[0]
+    return f"({' OR '.join(variants)})"
+
+
+def _expand_search_langs(lang: str, raw: bool = False) -> List[str]:
+    if raw:
+        return [""]
+    normalized = (lang or "").strip().lower()
+    if normalized in {"zh+zxx", "zh_zxx", "zh,zxx"}:
+        return ["zh", "zxx"]
+    return [normalized]
+
+
+def _expand_search_sorts(sort: str) -> List[str]:
+    normalized = (sort or "live").strip().lower()
+    if normalized == "all":
+        return ["live", "top"]
+    return [normalized if normalized in {"live", "top"} else "live"]
+
+
+def _sort_label(sort: str) -> str:
+    return {"live": "new", "top": "hot", "all": "all"}.get(sort, "new")
+
+
+def _sort_label_zh(sort: str) -> str:
+    return {"live": "最新", "top": "热门", "all": "全量"}.get(sort, "最新")
+
+
 def build_search_query(
     keyword: str,
     lang: str = "",
@@ -70,12 +129,7 @@ def build_search_query(
     if raw:
         return keyword
 
-    # Auto-wrap keyword in quotes for exact match if not already quoted
-    kw = keyword.strip()
-    if not (kw.startswith('"') and kw.endswith('"')):
-        kw = f'"{kw}"'
-
-    parts = [kw]
+    parts = [_keyword_expression(keyword)]
     if lang:
         parts.append(f"lang:{lang}")
     if days > 0:
@@ -326,6 +380,19 @@ def _resolve_output_base() -> Path:
     return Path(vault or output_dir or "output")
 
 
+def _summary_text(tweet_data: dict, max_len: int) -> str:
+    """Choose display text for x-so summary tables."""
+    article = tweet_data.get("article") or {}
+    source = ""
+    if isinstance(article, dict):
+        source = (article.get("title") or "").strip()
+        if not source:
+            source = (article.get("body") or "").strip()
+    if not source:
+        source = tweet_data.get("text", "") or ""
+    return _clean_title(str(source), max_len=max_len)
+
+
 def _generate_summary_table(
     keyword: str,
     query: str,
@@ -343,7 +410,7 @@ def _generate_summary_table(
     Args:
         show_keyword: If True, add a "关键词" column (used in merged multi-keyword mode).
     """
-    sort_label_zh = "最新" if sort == "live" else "热门"
+    sort_label_zh = _sort_label_zh(sort)
     date_str = datetime.now().strftime("%Y-%m-%d")
 
     # Sort by views descending (ensures correct order in merge mode)
@@ -389,7 +456,7 @@ def _generate_summary_table(
                 author = f"\u2705{author}"
             # Escape pipe and newlines — pipe breaks table columns
             author = author.replace("|", "\\|").replace("\n", " ").replace("\r", "")
-            summary = _clean_title(td.get("text", ""), max_len=40)
+            summary = _summary_text(td, max_len=40)
             summary = summary.replace("|", "\\|")
             # Escape brackets for markdown link
             summary = summary.replace("[", "\\[").replace("]", "\\]")
@@ -446,7 +513,7 @@ def _generate_summary_table(
             author = author_name if author_name else (f"@{handle}" if handle else "")
             if td.get("is_blue_verified"):
                 author = f"\u2705{author}"
-            summary = _clean_title(td.get("text", ""), max_len=80)
+            summary = _summary_text(td, max_len=80)
             likes = int(td.get("likes", 0) or 0)
             retweets = int(td.get("retweets", 0) or 0)
             replies_count = int(td.get("replies", 0) or 0)
@@ -492,15 +559,21 @@ async def search_twitter_keyword(
     Returns:
         dict with: total, saved, query, output_path
     """
-    # Build query
-    query = build_search_query(
-        keyword, lang=lang, days=days, min_faves=min_faves,
-        min_retweets=min_retweets, exclude_retweets=exclude_retweets,
-        raw=raw,
-    )
-    search_url = build_search_url(query, sort=sort)
-    logger.info(f"[X-SO] Query: {query}")
-    logger.info(f"[X-SO] URL: {search_url}")
+    search_specs: List[Tuple[str, str]] = []
+    for sort_variant in _expand_search_sorts(sort):
+        for lang_variant in _expand_search_langs(lang, raw=raw):
+            query = build_search_query(
+                keyword, lang=lang_variant, days=days, min_faves=min_faves,
+                min_retweets=min_retweets, exclude_retweets=exclude_retweets,
+                raw=raw,
+            )
+            if (sort_variant, query) not in search_specs:
+                search_specs.append((sort_variant, query))
+
+    query_label = " | ".join(dict.fromkeys(query for _, query in search_specs))
+    logger.info(f"[X-SO] Query: {query_label}")
+    for sort_variant, query in search_specs:
+        logger.info(f"[X-SO] URL: {build_search_url(query, sort=sort_variant)}")
 
     # Load cookies (supports multi-account rotation)
     cookies = load_twitter_cookies()
@@ -511,7 +584,7 @@ async def search_twitter_keyword(
 
     # Resolve output paths
     base_dir = _resolve_output_base()
-    sort_label = "new" if sort == "live" else "hot"
+    sort_label = _sort_label(sort)
     effective_days = days if not raw else 0
     subdir = f"search/{effective_days}day_{sort_label}"
     safe_keyword = _sanitize_for_dirname(keyword)
@@ -522,69 +595,74 @@ async def search_twitter_keyword(
     # Session path for browser fallback
     session_path = str(get_session_dir() / "twitter.json")
 
-    # Map sort to GraphQL product parameter
-    product = "Latest" if sort == "live" else "Top"
-
     # --- Tier 0: GraphQL pagination loop ---
-    all_entries = []
-    cursor = None
     max_pages = max_results // 20 + 5  # ~20 entries per page
-    graphql_failed = False
-
-    for page_num in range(max_pages):
-        from feedgrab.fetchers.twitter_cookies import (
-            fetch_with_cookie_rotation,
-            count_total_accounts,
-        )
-        response, rotated_cookies = fetch_with_cookie_rotation(
-            fetch_search_timeline_page,
-            label="X-SO",
-            raw_query=query,
-            cursor=cursor,
-            count=20,
-            product=product,
-        )
-        if rotated_cookies:
-            cookies = rotated_cookies
-        if not response:
-            total_accounts = count_total_accounts()
-            logger.warning(
-                f"[X-SO] >>> 第 {page_num + 1} 页所有 {total_accounts} 个账号均失败 <<< "
-                f"累计 {len(all_entries)} 条，停止分页"
-            )
-            graphql_failed = True
-            break
-
-        entries, cursors = parse_search_entries(response)
-        if not entries:
-            logger.info(f"[X-SO] No more entries at page {page_num + 1}")
-            break
-
-        all_entries.extend(entries)
-        logger.info(
-            f"[X-SO] Page {page_num + 1}: +{len(entries)} entries "
-            f"(total: {len(all_entries)})"
-        )
-
-        if len(all_entries) >= max_results:
-            break
-
-        cursor = cursors.get("bottom")
-        if not cursor:
-            break
-
-    logger.info(f"[X-SO] Total collected: {len(all_entries)} raw entries")
-
-    # --- Browser fallback when GraphQL returns nothing ---
     tweets = []
-    if not all_entries and graphql_failed and x_search_browser_fallback():
-        logger.info("[X-SO] GraphQL failed, trying browser fallback...")
-        tweets = await _search_via_browser(query, sort, max_results, session_path)
-        if tweets:
-            logger.info(f"[X-SO] Browser fallback: {len(tweets)} tweets")
-    else:
-        # Process GraphQL entries (dedup by tweet id)
-        seen_ids: set[str] = set()
+    seen_ids: set[str] = set()
+    total_raw_entries = 0
+
+    for sort_variant, query in search_specs:
+        product = "Latest" if sort_variant == "live" else "Top"
+        all_entries = []
+        cursor = None
+        graphql_failed = False
+
+        for page_num in range(max_pages):
+            from feedgrab.fetchers.twitter_cookies import (
+                fetch_with_cookie_rotation,
+                count_total_accounts,
+            )
+            response, rotated_cookies = fetch_with_cookie_rotation(
+                fetch_search_timeline_page,
+                label="X-SO",
+                raw_query=query,
+                cursor=cursor,
+                count=20,
+                product=product,
+            )
+            if rotated_cookies:
+                cookies = rotated_cookies
+            if not response:
+                total_accounts = count_total_accounts()
+                logger.warning(
+                    f"[X-SO] >>> {product} 第 {page_num + 1} 页所有 {total_accounts} 个账号均失败 <<< "
+                    f"累计 {len(all_entries)} 条，停止分页"
+                )
+                graphql_failed = True
+                break
+
+            entries, cursors = parse_search_entries(response)
+            if not entries:
+                logger.info(f"[X-SO] {product} no more entries at page {page_num + 1}")
+                break
+
+            all_entries.extend(entries)
+            logger.info(
+                f"[X-SO] {product} Page {page_num + 1}: +{len(entries)} entries "
+                f"(total: {len(all_entries)})"
+            )
+
+            if len(all_entries) >= max_results:
+                break
+
+            cursor = cursors.get("bottom")
+            if not cursor:
+                break
+
+        total_raw_entries += len(all_entries)
+
+        if not all_entries and graphql_failed and x_search_browser_fallback():
+            logger.info(f"[X-SO] {product} GraphQL failed, trying browser fallback...")
+            browser_tweets = await _search_via_browser(query, sort_variant, max_results, session_path)
+            if browser_tweets:
+                logger.info(f"[X-SO] {product} browser fallback: {len(browser_tweets)} tweets")
+            for td in browser_tweets:
+                tid = td.get("id", "")
+                if tid and tid not in seen_ids:
+                    seen_ids.add(tid)
+                    tweets.append(td)
+            continue
+
         for entry in all_entries:
             td = extract_tweet_data(entry)
             if not td:
@@ -595,16 +673,18 @@ async def search_twitter_keyword(
             seen_ids.add(tid)
             tweets.append(td)
 
-    # Truncate to max_results
-    tweets = tweets[:max_results]
-    logger.info(f"[X-SO] Extracted {len(tweets)} tweets")
+    logger.info(f"[X-SO] Total collected: {total_raw_entries} raw entries")
 
     # Sort by views (descending)
     tweets.sort(key=lambda td: int(td.get("views", 0) or 0), reverse=True)
 
+    # Truncate after merging and ranking, so Top/Article supplements can surface.
+    tweets = tweets[:max_results]
+    logger.info(f"[X-SO] Extracted {len(tweets)} tweets")
+
     # Generate summary table (skip in merge mode)
     if not skip_summary:
-        _generate_summary_table(keyword, query, sort, effective_days, tweets, summary_path)
+        _generate_summary_table(keyword, query_label, sort, effective_days, tweets, summary_path)
 
     # Optional: save individual tweets
     saved = 0
@@ -668,7 +748,7 @@ async def search_twitter_keyword(
     return {
         "total": len(tweets),
         "saved": saved,
-        "query": query,
+        "query": query_label,
         "output_path": str(summary_path),
         "csv_path": str(summary_path.with_suffix(".csv")),
         "tweets": tweets,

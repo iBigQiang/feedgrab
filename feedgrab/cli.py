@@ -1853,12 +1853,12 @@ def cmd_twitter_search(args: list):
 
     # Generate merged summary table
     if merge:
-        from feedgrab.fetchers.twitter_keyword_search import _generate_summary_table, _resolve_output_base
+        from feedgrab.fetchers.twitter_keyword_search import _generate_summary_table, _resolve_output_base, _sort_label
         from pathlib import Path
         from datetime import datetime as _dt
 
         base_dir = _resolve_output_base()
-        sort_label = "new" if sort == "live" else "hot"
+        sort_label = _sort_label(sort)
         date_str = _dt.now().strftime("%Y-%m-%d")
         merged_dir = base_dir / "X" / "search" / f"{days}day_{sort_label}"
         merged_name = "+".join(re.sub(r'[\\/:*?"<>|]', '_', k) for k in keywords)

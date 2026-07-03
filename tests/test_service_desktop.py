@@ -704,6 +704,7 @@ def test_settings_schema_update_persist_project_and_snapshot_redacts_secret(monk
     monkeypatch.setenv("FEEDGRAB_SETTINGS_PATH", str(settings_path))
     monkeypatch.delenv("FEISHU_APP_SECRET", raising=False)
     monkeypatch.delenv("X_SEARCH_DAYS", raising=False)
+    monkeypatch.delenv("OBSIDIAN_VAULT", raising=False)
 
     service = SettingsService()
     schema = service.schema().to_dict()
