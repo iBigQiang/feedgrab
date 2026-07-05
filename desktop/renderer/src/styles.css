@@ -146,19 +146,24 @@ button:disabled {
 
 .sidebar-footer {
   display: grid;
+  width: 100%;
   margin-top: auto;
   gap: 10px;
+  justify-items: center;
 }
 
 .sidebar-version {
+  width: 100%;
   color: #f0cf80;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 400;
   line-height: 1.4;
+  text-align: center;
 }
 
 .author-panel {
   display: grid;
+  width: 100%;
   gap: 4px;
   margin-top: 0;
   padding: 14px 4px 0;

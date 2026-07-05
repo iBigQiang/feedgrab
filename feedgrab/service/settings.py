@@ -242,10 +242,6 @@ class SettingsService:
                 self._saved_settings.pop("OUTPUT_DIR", None)
             changed = True
 
-        if self._is_legacy_desktop_default_path(self._saved_settings.get("OBSIDIAN_VAULT")):
-            self._saved_settings["OBSIDIAN_VAULT"] = ""
-            changed = True
-
         if self._is_desktop_default_data_dir_value(self._saved_settings.get("FEEDGRAB_DATA_DIR")):
             install_sessions_dir = os.getenv("FEEDGRAB_INSTALL_SESSIONS_DIR", "").strip()
             if install_sessions_dir:

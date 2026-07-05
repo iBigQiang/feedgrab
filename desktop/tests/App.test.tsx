@@ -96,6 +96,14 @@ describe("App", () => {
     expect(within(githubRow).getByText("GitHub").closest("a")).toBeNull();
   });
 
+  it("keeps the sidebar version understated and centered with its divider", () => {
+    const styles = readFileSync(join(process.cwd(), "renderer", "src", "styles.css"), "utf8");
+
+    expect(styles).toMatch(/\.sidebar-footer\s*\{[^}]*justify-items:\s*center;/s);
+    expect(styles).toMatch(/\.sidebar-version\s*\{[^}]*width:\s*100%;[^}]*font-weight:\s*400;[^}]*text-align:\s*center;/s);
+    expect(styles).toMatch(/\.author-panel\s*\{[^}]*width:\s*100%;[^}]*border-top:\s*1px solid #4c473c;/s);
+  });
+
   it("submits selected X keywords as a structured search task and shows the command preview", async () => {
     const api = createTestApi({
       startFetch: vi.fn().mockResolvedValue([

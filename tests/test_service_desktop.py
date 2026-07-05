@@ -774,7 +774,7 @@ def test_reddit_platform_settings_schema_includes_search_controls():
     assert fields["REDDIT_SEARCH_SUBREDDIT"].value_type == "string"
 
 
-def test_desktop_settings_migrates_legacy_default_output_and_vault(monkeypatch, tmp_path):
+def test_desktop_settings_migrates_legacy_default_output_but_preserves_vault(monkeypatch, tmp_path):
     from feedgrab.service.settings import SettingsService
 
     settings_path = tmp_path / "settings.json"
@@ -803,10 +803,10 @@ def test_desktop_settings_migrates_legacy_default_output_and_vault(monkeypatch, 
     saved = json.loads(settings_path.read_text(encoding="utf-8"))["values"]
 
     assert output_dir["value"] == str(install_output)
-    assert obsidian_vault["value"] == ""
+    assert obsidian_vault["value"] == "E:/Obsidian/Qiang_Obsidian/inbox"
     assert x_days["value"] == "9"
     assert saved["OUTPUT_DIR"] == str(install_output)
-    assert saved["OBSIDIAN_VAULT"] == ""
+    assert saved["OBSIDIAN_VAULT"] == "E:/Obsidian/Qiang_Obsidian/inbox"
     assert saved["X_SEARCH_DAYS"] == 9
 
 
