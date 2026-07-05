@@ -55,7 +55,7 @@ Desktop docs and installer entry points:
 
 - [Windows desktop client guide](desktop/README.md)
 - [Windows packaging guide](docs/feedgrab-desktop-packaging.md)
-- [feedgrab Desktop 0.1.14 preview installer](https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.14-20260703/feedgrab-desktop-setup-0.1.14.exe)
+- [feedgrab Desktop 0.1.15 preview installer](https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.15-20260705/feedgrab-desktop-setup-0.1.15.exe)
 
 Development commands:
 

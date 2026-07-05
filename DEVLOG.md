@@ -2,6 +2,40 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-07-05 · v0.26.5-dev · 桌面端 0.1.15 侧边栏版本号样式修复 + OBSIDIAN_VAULT 迁移保留发布
+
+### 背景
+
+`feedgrab-desktop` 分支针对桌面端做两处小修复：侧边栏底部版本号样式不对齐，以及设置迁移误清空用户已配置的 `OBSIDIAN_VAULT`。主分支 `main` 本轮不改动。
+
+### 实施
+
+- 桌面端安装包版本递增到 `0.1.15`，重新生成普通用户 NSIS 安装器。
+- 侧边栏底部"版本号"去除加粗效果（`font-weight` 700 → 400），并与上方的分隔横线一起在 `.sidebar-footer` 内居中对齐；下方作者信息行（作者：强子手记 / 主页 / 推特 / 仓库）保持左对齐不变。
+  - `.sidebar-footer` 新增 `width: 100%` + `justify-items: center`。
+  - `.sidebar-version` 新增 `width: 100%` + `text-align: center`；`font-weight: 700 → 400`。
+  - `.author-panel` 新增 `width: 100%`（保持横线 `border-top` 拉满 footer 宽度，**不**加 `justify-items: center`，避免作者行被居中）。
+- 修复 `feedgrab/service/settings.py` 设置迁移逻辑：保留用户已配置的 `OBSIDIAN_VAULT` 路径，不再因检测到 legacy 默认路径而误清空用户已设置的值。
+- 回归测试 `desktop/tests/App.test.tsx` 的 `keeps the sidebar version understated and centered with its divider` 断言版本号 normal weight + 居中、横线来自全宽 author-panel。
+- GitHub Release notes 使用中文完整说明，并回填真实 `browser_download_url`。
+
+### 验证结果
+
+- `desktop`: `npm test`：83 passed。
+- `desktop`: `npm run lint`：通过。
+- `desktop`: `npm run build`：通过。
+- `python -m pytest tests/test_service_desktop.py tests/test_worker_protocol.py tests/test_service_layer.py -q -p no:cacheprovider`：100 passed（含本次 `test_desktop_settings_migrates_legacy_default_output_but_preserves_vault`）。
+- `desktop`: `npm run pack:user`：成功生成 `D:\AiCode\feedgrab\desktop\release-packages\20260705-175349\feedgrab Desktop Setup 0.1.15.exe`。
+- 安装包大小：`376917514` bytes。
+- 安装包 SHA256：`4C1694E4C418B6AD48FAA9CB9E9C94425AEB6DA69FDD0669982CA840B7DA742C`。
+- 安装包签名状态：未签名。
+- GitHub Release：`desktop-v0.1.15-20260705`，asset `feedgrab-desktop-setup-0.1.15.exe` 已上传。
+- 下载地址核验：GitHub API 返回的 `browser_download_url` 为 `https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.15-20260705/feedgrab-desktop-setup-0.1.15.exe`，`curl.exe -I -L` 最终返回 `200 OK`，`Content-Length: 376917514`。
+
+### 状态：已完成 ✅
+
+---
+
 ## 2026-07-03 · v0.26.5-dev · 桌面端 0.1.14 X/Twitter Article 搜索覆盖优化发布
 
 ### 背景
