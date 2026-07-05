@@ -32,6 +32,8 @@
 发布文档更新后，`feedgrab-desktop` 分支根目录 `README.md` 必须与 `desktop/README.md` 保持全文一致，确保 GitHub 打开桌面分支时默认展示客户端说明。
 每次重新发布安装包前必须递增 `desktop/package.json` 小版本号，例如 `0.1.13`、`0.1.14`，不要复用旧版本号生成新安装包。
 
+安装包文件名由 `desktop/electron-builder.yml` 的 `nsis.artifactName` 控制，已配置为 `feedgrab-desktop-setup-${version}.exe`（连字符、无空格、全小写）。`npm run pack:user` 产物会自动符合 Release asset 规范名，无需手动复制重命名。`productName: feedgrab Desktop`（带空格）仍用于窗口标题、开始菜单快捷方式和安装器 UI 显示名，不受 `artifactName` 影响。
+
 两个版本都会先构建 `feedgrab-runtime`，包含：
 
 - `feedgrab-worker.exe`：由 PyInstaller 从 `feedgrab/worker.py` 冻结生成。

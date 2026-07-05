@@ -105,6 +105,8 @@ Release asset 文件名使用无空格、稳定、可复制的名称：
 feedgrab-desktop-setup-<desktop-package-version>.exe
 ```
 
+`desktop/electron-builder.yml` 的 `nsis.artifactName` 已配置为 `feedgrab-desktop-setup-${version}.exe`，`npm run pack:user` 产物会自动使用这个规范名，无需手动复制重命名。`gh release create` / `gh release upload` 的 `"$installer#$assetName"` 语法在产物名与 `$assetName` 一致时 `#assetName` 可省略（保留也无害）。
+
 GitHub Release 介绍信息必须用中文写全，不要只写一句英文占位说明。Release notes 至少包含：
 
 - 版本标题，例如 `feedgrab Desktop v0.1.13 阶段性测试版`

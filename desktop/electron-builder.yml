@@ -27,6 +27,7 @@ win:
       arch:
         - x64
 nsis:
+  artifactName: "feedgrab-desktop-setup-${version}.exe"
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
