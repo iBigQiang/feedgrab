@@ -79,8 +79,8 @@ describe("App", () => {
     expect(rows.map((row) => row.textContent?.replace(/\s+/g, ""))).toEqual([
       "作者：强子手记",
       "主页：@iBigQiang",
-      "推特：X",
-      "仓库：GitHub"
+      "仓库：GitHub",
+      "推特：X"
     ]);
     expect(container.querySelectorAll(".author-row")).toHaveLength(4);
     expect(container.querySelectorAll(".author-row strong")).toHaveLength(0);

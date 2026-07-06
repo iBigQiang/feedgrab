@@ -823,6 +823,14 @@ def feishu_download_images() -> bool:
     return os.getenv("FEISHU_DOWNLOAD_IMAGES", "false").lower() in ("true", "1", "yes")
 
 
+def feishu_download_media() -> bool:
+    """Download Feishu images/videos/files locally. Keeps old image flag compatible."""
+    val = os.getenv("FEISHU_DOWNLOAD_MEDIA", "").strip().lower()
+    if val:
+        return val in ("true", "1", "yes")
+    return feishu_download_images()
+
+
 def feishu_page_load_timeout() -> int:
     """Playwright page element wait timeout in ms. Default 5000."""
     try:

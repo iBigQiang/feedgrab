@@ -552,17 +552,6 @@ export function App(): ReactElement {
               </a>
             </div>
             <div className="author-row">
-              <span className="author-label">推特：</span>
-              <span className="author-value author-social-value">
-                <a className="author-icon-link" href="https://x.com/iBigQiang" target="_blank" rel="noreferrer" aria-label="推特">
-                  <span aria-hidden="true" className="author-link-icon">
-                    <SidebarIcon name="x" />
-                  </span>
-                </a>
-                <span>X</span>
-              </span>
-            </div>
-            <div className="author-row">
               <span className="author-label">仓库：</span>
               <span className="author-value author-social-value">
                 <a
@@ -577,6 +566,17 @@ export function App(): ReactElement {
                   </span>
                 </a>
                 <span>GitHub</span>
+              </span>
+            </div>
+            <div className="author-row">
+              <span className="author-label">推特：</span>
+              <span className="author-value author-social-value">
+                <a className="author-icon-link" href="https://x.com/iBigQiang" target="_blank" rel="noreferrer" aria-label="推特">
+                  <span aria-hidden="true" className="author-link-icon">
+                    <SidebarIcon name="x" />
+                  </span>
+                </a>
+                <span>X</span>
               </span>
             </div>
           </div>
@@ -2111,7 +2111,7 @@ function settingsSchemaFromSnapshot(settings: SettingsSnapshot | undefined): Set
           { name: "FEISHU_APP_SECRET", label: "飞书 App Secret", type: "secret", value: "[redacted]", secret: true },
           { name: "FEISHU_CDP_ENABLED", label: "飞书复用 Chrome CDP", type: "boolean", value: false },
           { name: "FEISHU_WIKI_DELAY", label: "飞书知识库批量间隔秒数", type: "number", value: 2 },
-          { name: "FEISHU_DOWNLOAD_IMAGES", label: "飞书图片下载到本地", type: "boolean", value: false },
+          { name: "FEISHU_DOWNLOAD_IMAGES", label: "飞书媒体下载到本地", type: "boolean", value: false },
           { name: "FEISHU_PAGE_LOAD_TIMEOUT", label: "飞书页面等待毫秒", type: "number", value: 5000 },
           { name: "FEISHU_CUSTOM_DOMAINS", label: "飞书私有化域名", type: "string", value: "" },
           { name: "KDOCS_CDP_ENABLED", label: "金山文档复用 Chrome CDP", type: "boolean", value: true },

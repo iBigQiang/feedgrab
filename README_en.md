@@ -329,7 +329,7 @@ Claude Code config (`~/.claude/claude_desktop_config.json`):
 | LinuxDo / Discourse forum | **Discourse Topic JSON API** → **CDP Chrome reuse** → **Playwright in-page fetch** → Jina (last resort; saves OP + author follow-up replies by default, switchable to full thread) | — |
 | IDCFlare / Discourse forum | **Discourse Topic JSON API** → **CDP Chrome reuse** → **Playwright in-page fetch** → Jina (last resort; saves OP + author follow-up replies by default, switchable to full thread) | — |
 | Xiaohongshu (小红书) | **API (xhshow)** → **Pinia Store injection** → Jina → **Playwright deep fetch** (single + **author batch** + **search batch** + **keyword search `xhs-so`**) | — |
-| Feishu/Lark (飞书) | **Open API** → **CDP direct connect** → **Playwright PageMain** → Jina (single + **wiki batch `feishu-wiki`** + embedded sheets + image download; virtual tree traversal + table-layout fix) | — |
+| Feishu/Lark (飞书) | **Open API** → **CDP direct connect** → **Playwright PageMain** → Jina (single + **wiki batch `feishu-wiki`** + embedded sheets + media download; virtual tree traversal + table-layout fix) | — |
 | KDocs (金山文档) | **Playwright ProseMirror DOM** extraction (virtual scroll + code blocks + image shapes API + CDP direct connect) | — |
 | Youdao Note (有道云笔记) | **JSON API** (zero dependency) → Playwright iframe DOM → Jina (single doc + image download) | — |
 | Zhihu (知乎) | **API v4** → **Playwright CDP/DOM** → Jina (single Q&A top 3 answers + articles + **keyword search `zhihu-so`**) | — |
@@ -761,7 +761,7 @@ feedgrab/
 │   │   ├── xhs_pinia.py       # XHS Pinia Store injection (browser-native fallback, CDP-first)
 │   │   ├── xhs_user_notes.py  # XHS author batch fetch (API → Pinia → browser 3-tier strategy)
 │   │   ├── xhs_search_notes.py # XHS search batch fetch (xhs-so API/Pinia search + scroll + deep fetch)
-│   │   ├── feishu.py          # Feishu single doc (Open API → Playwright PageMain → Jina + Block→MD + image download)
+│   │   ├── feishu.py          # Feishu single doc (Open API → Playwright PageMain → Jina + Block→MD + media download)
 │   │   ├── feishu_wiki.py     # Feishu wiki batch (Open API recursive + virtual-tree/Playwright fallback + resume)
 │   │   ├── kdocs.py           # KDocs (WPS) single doc (Playwright ProseMirror DOM + virtual scroll + CDP)
 │   │   └── youdao.py          # Youdao Note single doc (JSON API + Playwright iframe DOM + Jina 3-tier fallback)

@@ -8,8 +8,8 @@ Tier 2: Jina Reader (zero-config fallback)
 """
 
 import hashlib
+import html
 import json as _json_mod
-import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -21,8 +21,7 @@ from feedgrab.config import (
     feishu_download_images,
     get_session_dir,
 )
-
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 # ---------------------------------------------------------------------------
 # Title helpers
@@ -247,10 +246,12 @@ def _fetch_via_api(url: str, parsed: Dict[str, str]) -> Dict[str, Any]:
     doc_title, blocks = _fetch_document_blocks(document_id)
     title = wiki_title or doc_title
     images_list: List[dict] = []
+    media_list: List[dict] = []
     # Per-document image subdirectory: first 7 chars of item_id
     _img_subdir = hashlib.md5(url.encode()).hexdigest()[:12]
-    content = blocks_to_markdown(blocks, images=images_list,
-                                 img_subdir=_img_subdir)
+    content = blocks_to_markdown(
+        blocks, images=images_list, img_subdir=_img_subdir, media=media_list
+    )
 
     return {
         "title": title,
@@ -261,6 +262,8 @@ def _fetch_via_api(url: str, parsed: Dict[str, str]) -> Dict[str, Any]:
         "doc_token": document_id,
         "images": [img.get("token", "") for img in images_list],
         "images_info": images_list,
+        "media": [item.get("token", "") for item in media_list],
+        "media_info": media_list,
         "img_subdir": _img_subdir,
         "tags": [],
     }
@@ -342,6 +345,7 @@ def _render_isv_block(block) -> Optional[str]:
 def blocks_to_markdown(
     blocks, depth: int = 0, images: Optional[List[dict]] = None,
     img_subdir: str = "", _is_root: bool = True,
+    media: Optional[List[dict]] = None,
 ) -> str:
     """Convert a list of API block objects to Markdown.
 
@@ -349,7 +353,9 @@ def blocks_to_markdown(
     or dicts from Playwright extraction (with ``type`` string key).
 
     If *images* list is provided, image metadata dicts are appended to it
-    (side-effect collector for the download pipeline).
+    (side-effect collector for the legacy image download pipeline).
+    If *media* list is provided, image, video, audio, and file metadata dicts
+    are appended to it for the unified local media pipeline.
 
     *img_subdir* — when set, image paths become
     ``attachments/{img_subdir}/{fname}`` instead of ``attachments/{fname}``.
@@ -370,7 +376,7 @@ def blocks_to_markdown(
             ordered_counter = 0
 
         md = _block_to_md(block, btype, depth, ordered_counter, images,
-                          img_subdir)
+                          img_subdir, media)
 
         if btype == "ordered":
             ordered_counter += 1
@@ -396,8 +402,10 @@ def _resolve_block_type(block) -> str:
             return _BLOCK_TYPE_MAP.get(t, f"unknown_{t}")
         if t == "fallback":
             snap = block.get("snapshot")
-            if isinstance(snap, dict) and snap.get("type") == "code":
-                return "code"
+            if isinstance(snap, dict):
+                snap_type = str(snap.get("type") or "")
+                if snap_type in ("code", "video", "audio", "file", "media"):
+                    return snap_type
         return str(t)
     return "unknown"
 
@@ -406,6 +414,7 @@ def _block_to_md(
     block, btype: str, depth: int, ordered_idx: int,
     images: Optional[List[dict]] = None,
     img_subdir: str = "",
+    media: Optional[List[dict]] = None,
 ) -> Optional[str]:
     """Render a single block to Markdown text, or None to skip."""
     indent = "  " * depth
@@ -414,23 +423,31 @@ def _block_to_md(
         return None  # root container, skip
 
     if btype == "text":
-        return _elements_text(block)
+        text = _elements_text(block).strip()
+        child_md = _render_children(block, depth, images, img_subdir, media)
+        if text and child_md:
+            return f"{text}\n\n{child_md}"
+        return text or child_md or None
 
     if btype.startswith("heading"):
         level = int(btype[-1]) if btype[-1].isdigit() else 1
         level = min(level, 6)  # h7-h9 → h6
-        text = _elements_text(block)
-        return f"{'#' * level} {text}"
+        text = _elements_text(block).strip()
+        heading = f"{'#' * level} {text}"
+        child_md = _render_children(block, depth, images, img_subdir, media)
+        return f"{heading}\n\n{child_md}" if child_md else heading
 
     if btype == "bullet":
         text = _elements_text(block)
-        child_md = _render_children(block, depth + 1, images, img_subdir)
+        child_md = _render_children(block, depth + 1, images, img_subdir,
+                                    media)
         line = f"{indent}- {text}"
         return f"{line}\n{child_md}" if child_md else line
 
     if btype == "ordered":
         text = _elements_text(block)
-        child_md = _render_children(block, depth + 1, images, img_subdir)
+        child_md = _render_children(block, depth + 1, images, img_subdir,
+                                    media)
         seq_label = _calc_ordered_label(block, ordered_idx)
         line = f"{indent}{seq_label}. {text}"
         return f"{line}\n{child_md}" if child_md else line
@@ -449,14 +466,14 @@ def _block_to_md(
 
     if btype in ("quote", "quote_container"):
         text = _elements_text(block)
-        child_md = _render_children(block, depth, images, img_subdir)
+        child_md = _render_children(block, depth, images, img_subdir, media)
         combined = text or child_md or ""
         lines = combined.split("\n")
         return "\n".join(f"> {l}" for l in lines)
 
     if btype == "callout":
         text = _elements_text(block)
-        child_md = _render_children(block, depth, images, img_subdir)
+        child_md = _render_children(block, depth, images, img_subdir, media)
         combined = text or child_md or ""
         lines = combined.split("\n")
         return "\n".join(f"> {l}" for l in lines)
@@ -475,11 +492,19 @@ def _block_to_md(
             return None
         name = info.get("name", "") or "image"
         alt = name.rsplit(".", 1)[0] if "." in name else name
-        idx = len(images) + 1 if images is not None else 0
+        idx = len(media) + 1 if media is not None else (
+            len(images) + 1 if images is not None else 0
+        )
         fname = _image_filename(info if info else {"name": name}, idx)
+        info["token"] = token
+        info["media_type"] = "image"
         if images is not None:
             info["_filename"] = fname
             images.append(info)
+        if media is not None:
+            media_info = dict(info)
+            media_info["_filename"] = fname
+            media.append(media_info)
         # Use relative path for Obsidian compatibility.
         if img_subdir:
             path = f"attachments/{img_subdir}/{fname}"
@@ -488,23 +513,28 @@ def _block_to_md(
         return f"![{alt}]({path})"
 
     if btype == "file":
-        name = _get_file_name(block)
-        token = _get_file_token(block)
-        return f"[{name}]({token})" if name else None
+        return _render_media_block(block, btype, media, img_subdir)
 
     if btype == "table":
-        return _render_table(block)
+        return _render_table(block, images, img_subdir, media)
 
     if btype in ("grid", "grid_column"):
-        return _render_children(block, depth, images, img_subdir)
+        return _render_children(block, depth, images, img_subdir, media)
 
     if btype == "iframe":
         src = _get_iframe_src(block)
         return f"[Embed]({src})" if src else None
 
+    if btype in ("video", "audio", "media"):
+        return _render_media_block(block, btype, media, img_subdir)
+
     # Sheet / Bitable / embedded objects (editor reports type="fallback")
     if btype in ("fallback", "bitable", "sheet"):
-        return _render_embedded_block(block)
+        embedded_md = _render_embedded_block(block)
+        child_md = _render_children(block, depth, images, img_subdir, media)
+        if embedded_md and child_md:
+            return f"{embedded_md}\n\n{child_md}"
+        return embedded_md or child_md or None
 
     # ISV catalog (TOC) component — generate from sibling headings
     if btype == "isv":
@@ -512,6 +542,11 @@ def _block_to_md(
 
     # Fallback: try to extract any text
     text = _elements_text(block)
+    child_md = _render_children(block, depth, images, img_subdir, media)
+    if text and child_md:
+        return f"{text}\n\n{child_md}"
+    if child_md:
+        return child_md
     if text:
         return text
     return None
@@ -855,6 +890,137 @@ def _get_file_token(block) -> str:
     if isinstance(block, dict) and "file" in block:
         return block["file"].get("token", "")
     return ""
+
+
+def _get_media_info(block, btype: str = "") -> dict:
+    """Extract generic Feishu media metadata from file/video/audio blocks."""
+
+    def _value(mapping: dict, names: tuple[str, ...]) -> str:
+        for name in names:
+            val = mapping.get(name)
+            if val:
+                return str(val)
+        return ""
+
+    def _nested_mapping(mapping: dict) -> dict:
+        for key in (
+            "file", "video", "audio", "media", "attachment",
+            "driveFile", "drive_file", "data",
+        ):
+            val = mapping.get(key)
+            if isinstance(val, dict):
+                nested = _nested_mapping(val)
+                if nested:
+                    return nested
+                if _value(val, ("token", "fileToken", "file_token")):
+                    return val
+        if _value(mapping, ("token", "fileToken", "file_token")):
+            return mapping
+        return {}
+
+    def _int_value(mapping: dict, names: tuple[str, ...]) -> int:
+        for name in names:
+            val = mapping.get(name)
+            if val:
+                try:
+                    return int(val)
+                except (TypeError, ValueError):
+                    continue
+        return 0
+
+    obj = getattr(block, "file", None) or getattr(block, "video", None) or getattr(block, "audio", None)
+    if obj is not None:
+        info = {
+            "token": getattr(obj, "token", "") or "",
+            "name": getattr(obj, "name", "") or "",
+            "mime_type": getattr(obj, "mime_type", "") or "",
+            "size": getattr(obj, "size", 0) or 0,
+        }
+        info["media_type"] = _infer_media_type(
+            info.get("name", ""), info.get("mime_type", ""), btype
+        )
+        return info
+
+    if isinstance(block, dict):
+        candidates = []
+        for key in ("file", "video", "audio", "media", "attachment"):
+            if isinstance(block.get(key), dict):
+                candidates.append(block[key])
+        snap = block.get("snapshot", {})
+        if isinstance(snap, dict):
+            candidates.append(snap)
+            for key in ("file", "video", "audio", "media", "attachment", "data"):
+                if isinstance(snap.get(key), dict):
+                    candidates.append(snap[key])
+
+        for candidate in candidates:
+            raw = _nested_mapping(candidate)
+            if not raw:
+                continue
+            info = {
+                "token": _value(raw, ("token", "fileToken", "file_token")),
+                "name": _value(
+                    raw,
+                    ("name", "fileName", "file_name", "title", "displayName"),
+                ),
+                "mime_type": _value(
+                    raw,
+                    ("mimeType", "mime_type", "contentType", "content_type"),
+                ),
+                "size": _int_value(raw, ("size", "fileSize", "file_size")),
+            }
+            info["media_type"] = _infer_media_type(
+                info.get("name", ""), info.get("mime_type", ""), btype
+            )
+            if info["token"]:
+                return info
+
+    return {}
+
+
+def _infer_media_type(name: str, mime_type: str, btype: str = "") -> str:
+    mime = (mime_type or "").lower()
+    suffix = Path(name or "").suffix.lower()
+    if mime.startswith("image/"):
+        return "image"
+    if mime.startswith("video/") or suffix in (".mp4", ".m4v", ".mov", ".webm"):
+        return "video"
+    if mime.startswith("audio/") or suffix in (".mp3", ".m4a", ".wav", ".ogg"):
+        return "audio"
+    if btype in ("video", "audio", "image"):
+        return btype
+    return "file"
+
+
+def _render_media_block(
+    block, btype: str, media: Optional[List[dict]] = None,
+    img_subdir: str = "",
+) -> Optional[str]:
+    info = _get_media_info(block, btype)
+    token = info.get("token", "") or _get_file_token(block)
+    name = info.get("name", "") or _get_file_name(block) or "file"
+    if not token:
+        return name if name else None
+
+    info["token"] = token
+    info["name"] = name
+    info["media_type"] = _infer_media_type(
+        name, info.get("mime_type", ""), btype
+    )
+    idx = len(media) + 1 if media is not None else 0
+    fname = _media_filename(info, idx)
+    if media is not None:
+        info["_filename"] = fname
+        media.append(info)
+
+    path = f"attachments/{img_subdir}/{fname}" if img_subdir else f"attachments/{fname}"
+    escaped_path = html.escape(path, quote=True)
+    label = html.escape(name, quote=False)
+    if info["media_type"] == "video":
+        return f'<video controls src="{escaped_path}"></video>'
+    if info["media_type"] == "audio":
+        return f'<audio controls src="{escaped_path}"></audio>'
+    return f"[{label}]({path})"
 
 
 def _get_iframe_src(block) -> str:
@@ -1626,13 +1792,14 @@ def _to_roman(n: int) -> str:
 def _render_children(
     block, depth: int, images: Optional[List[dict]] = None,
     img_subdir: str = "",
+    media: Optional[List[dict]] = None,
 ) -> str:
     """Render child blocks (for nested structures like lists, grids, etc.)."""
     children = _get_children(block)
     if not children:
         return ""
     return blocks_to_markdown(children, depth, images, img_subdir,
-                              _is_root=False)
+                              _is_root=False, media=media)
 
 
 def _get_children(block) -> list:
@@ -1649,7 +1816,12 @@ def _get_children(block) -> list:
 # Table rendering
 # ---------------------------------------------------------------------------
 
-def _render_table(block) -> str:
+def _render_table(
+    block,
+    images: Optional[List[dict]] = None,
+    img_subdir: str = "",
+    media: Optional[List[dict]] = None,
+) -> str:
     """Render a table block as GFM Markdown table."""
     children = _get_children(block)
     if not children:
@@ -1678,7 +1850,11 @@ def _render_table(block) -> str:
         for j in range(col_count):
             idx = i * col_count + j
             if idx < len(children):
-                row_cells.append(_render_table_cell(children[idx]))
+                row_cells.append(
+                    _render_table_cell(
+                        children[idx], images, img_subdir, media
+                    )
+                )
             else:
                 row_cells.append("")
         rows.append(row_cells)
@@ -1696,12 +1872,26 @@ def _render_table(block) -> str:
     return "\n".join(lines)
 
 
-def _render_table_cell(block) -> str:
+def _render_table_cell(
+    block,
+    images: Optional[List[dict]] = None,
+    img_subdir: str = "",
+    media: Optional[List[dict]] = None,
+) -> str:
     cell_text = _elements_text(block).strip()
-    if not cell_text:
-        cell_children = _get_children(block)
-        if cell_children:
-            cell_text = blocks_to_markdown(cell_children, _is_root=False).strip()
+    cell_children = _get_children(block)
+    if cell_children:
+        child_text = blocks_to_markdown(
+            cell_children,
+            images=images,
+            img_subdir=img_subdir,
+            _is_root=False,
+            media=media,
+        ).strip()
+        if cell_text and child_text:
+            cell_text = f"{cell_text}\n{child_text}"
+        elif child_text:
+            cell_text = child_text
     return cell_text.replace("|", "\\|").replace("\n", "<br>")
 
 
@@ -1780,12 +1970,17 @@ async def _fetch_via_playwright(url: str) -> Dict[str, Any]:
 
     # Convert editor block tree to Markdown
     images_list: List[dict] = []
+    media_list: List[dict] = []
     _img_subdir = hashlib.md5(url.encode()).hexdigest()[:12]
     block_tree = data.get("blockTree")
     if block_tree:
         children = block_tree.get("children", [])
-        content = blocks_to_markdown(children, images=images_list,
-                                     img_subdir=_img_subdir)
+        content = blocks_to_markdown(
+            children,
+            images=images_list,
+            img_subdir=_img_subdir,
+            media=media_list,
+        )
     else:
         content = data.get("content", "")
 
@@ -1799,8 +1994,20 @@ async def _fetch_via_playwright(url: str) -> Dict[str, Any]:
             tk = img_info.get("token", "")
             if tk and tk in pre_bytes:
                 img_info["_bytes"] = pre_bytes[tk]
+        for media_info in media_list:
+            tk = media_info.get("token", "")
+            if tk and tk in pre_bytes:
+                media_info["_bytes"] = pre_bytes[tk]
         # Free the large dict from data to reduce memory
         del data["_image_bytes"]
+
+    media_urls = data.get("_media_urls", {})
+    if media_urls:
+        for media_info in media_list:
+            tk = media_info.get("token", "")
+            if tk and tk in media_urls:
+                media_info["url"] = media_urls[tk]
+        del data["_media_urls"]
 
     # Title: clean zero-width chars + fallback to first heading in content
     title = _clean_feishu_title(data.get("title", ""))
@@ -1820,6 +2027,8 @@ async def _fetch_via_playwright(url: str) -> Dict[str, Any]:
         "doc_token": parsed.get("token", ""),
         "images": [img.get("token", "") for img in images_list],
         "images_info": images_list,
+        "media": [item.get("token", "") for item in media_list],
+        "media_info": media_list,
         "img_subdir": _img_subdir,
         "tags": [],
     }
@@ -2111,22 +2320,75 @@ def _image_filename(info: dict, idx: int) -> str:
     return f"{idx:03d}_image{ext}"
 
 
-def _download_images_via_api(att_dir: Path, images: List[dict]) -> None:
-    """Download images via Open API to *att_dir*."""
+def _media_filename(info: dict, idx: int) -> str:
+    """Build a filename for any Feishu media attachment."""
+    name = info.get("name", "")
+    mime = (info.get("mime_type", "") or "").lower()
+    media_type = info.get("media_type", "") or "file"
+    ext_map = {
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/gif": ".gif",
+        "image/webp": ".webp",
+        "image/svg+xml": ".svg",
+        "video/mp4": ".mp4",
+        "video/webm": ".webm",
+        "video/quicktime": ".mov",
+        "audio/mpeg": ".mp3",
+        "audio/mp4": ".m4a",
+        "audio/wav": ".wav",
+        "application/pdf": ".pdf",
+    }
+    if name:
+        safe_name = _sanitize_filename(name)
+        if "." not in Path(safe_name).name and mime in ext_map:
+            safe_name += ext_map[mime]
+        return f"{idx:03d}_{safe_name}"
+    ext = ext_map.get(mime, "")
+    if not ext:
+        ext = {"image": ".png", "video": ".mp4", "audio": ".mp3"}.get(
+            media_type, ".bin"
+        )
+    return f"{idx:03d}_{media_type}{ext}"
+
+
+def download_feishu_media(
+    md_path: str, media_info: List[dict], doc_url: str,
+    media_subdir: str = "",
+) -> None:
+    """Download Feishu images, videos, audio, and files to attachments."""
+    if not media_info:
+        return
+
+    md_dir = Path(md_path).parent
+    att_dir = md_dir / "attachments"
+    if media_subdir:
+        att_dir = att_dir / media_subdir
+    att_dir.mkdir(parents=True, exist_ok=True)
+
+    if _is_api_available():
+        _download_media_via_api(att_dir, media_info)
+        return
+
+    _download_media_via_cdn(att_dir, media_info, doc_url)
+
+
+def _download_media_via_api(att_dir: Path, media_items: List[dict]) -> None:
+    """Download media via Open API to *att_dir*."""
     import lark_oapi as lark
     from lark_oapi.api.drive.v1 import DownloadMediaRequest
 
     client = _get_lark_client()
 
-    for idx, info in enumerate(images, 1):
+    for idx, info in enumerate(media_items, 1):
         token = info.get("token", "")
         if not token:
             continue
 
-        fname = info.get("_filename") or _image_filename(info, idx)
+        fname = info.get("_filename") or _media_filename(info, idx)
         fpath = att_dir / fname
         if fpath.exists() and fpath.stat().st_size > 0:
-            logger.info(f"[Feishu] Image {idx} already exists: {fname}")
+            logger.info(f"[Feishu] Media {idx} already exists: {fname}")
             continue
 
         try:
@@ -2134,24 +2396,48 @@ def _download_images_via_api(att_dir: Path, images: List[dict]) -> None:
             resp = client.drive.v1.media.download(req)
             if resp.success():
                 fpath.write_bytes(resp.file.read())
-                logger.info(f"[Feishu] Downloaded image {idx}: {fname}")
+                logger.info(f"[Feishu] Downloaded media {idx}: {fname}")
             else:
                 logger.warning(
-                    f"[Feishu] Image download failed {token}: {resp.msg}"
+                    f"[Feishu] Media download failed {token}: {resp.msg}"
                 )
         except Exception as e:
-            logger.warning(f"[Feishu] Image download error {token}: {e}")
+            logger.warning(f"[Feishu] Media download error {token}: {e}")
 
 
-def _download_images_via_cdn(
-    att_dir: Path, images: List[dict], doc_url: str,
+def _download_media_via_cdn(
+    att_dir: Path, media_items: List[dict], doc_url: str,
 ) -> None:
-    """Download images via Feishu internal CDN to *att_dir*.
+    """Download media via Feishu internal CDN to *att_dir*.
 
     Uses the same origin as the document URL to build download URLs.
     Requires browser session cookies for authentication.
     """
     from urllib.parse import urlparse
+
+    pending: List[tuple[int, dict, str, Path]] = []
+    for idx, info in enumerate(media_items, 1):
+        token = info.get("token", "")
+        if not token:
+            continue
+
+        fname = info.get("_filename") or _media_filename(info, idx)
+        fpath = att_dir / fname
+        if fpath.exists() and fpath.stat().st_size > 0:
+            logger.info(f"[Feishu] Media {idx} already exists: {fname}")
+            continue
+
+        pre_bytes = info.pop("_bytes", None)
+        if pre_bytes:
+            fpath.write_bytes(pre_bytes)
+            logger.info(
+                f"[Feishu] Wrote pre-downloaded media {idx}: {fname}"
+            )
+            continue
+        pending.append((idx, info, fname, fpath))
+
+    if not pending:
+        return
 
     parsed = urlparse(doc_url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
@@ -2169,7 +2455,7 @@ def _download_images_via_cdn(
             pass
 
     if not cookies:
-        logger.warning("[Feishu] No session cookies for image download")
+        logger.warning("[Feishu] No session cookies for media download")
         return
 
     # Build authenticated headers — Feishu CDN requires CSRF + browser-like context
@@ -2178,53 +2464,85 @@ def _download_images_via_cdn(
         "Referer": doc_url,
         "Origin": origin,
         "X-CSRFToken": csrf_token,
-        "X-Request-Id": f"feedgrab_img_{int(__import__('time').time())}",
-        "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+        "X-Request-Id": f"feedgrab_media_{int(__import__('time').time())}",
+        "Accept": "*/*",
     }
 
     from feedgrab.utils.http_client import get as http_get
 
-    for idx, info in enumerate(images, 1):
+    for idx, info, fname, fpath in pending:
         token = info.get("token", "")
         if not token:
             continue
 
-        fname = info.get("_filename") or _image_filename(info, idx)
-        fpath = att_dir / fname
-        if fpath.exists() and fpath.stat().st_size > 0:
-            logger.info(f"[Feishu] Image {idx} already exists: {fname}")
-            continue
+        # Original-file endpoint first — the DOM <video src> stream URL serves
+        # a transcoded preview (smaller than the uploaded file), keep it only
+        # as fallback when the original download is rejected.
+        candidates = [f"{origin}/space/api/box/stream/download/all/{token}/"]
+        dom_url = info.get("url", "")
+        if dom_url:
+            if dom_url.startswith("/"):
+                dom_url = origin + dom_url
+            if dom_url not in candidates:
+                candidates.append(dom_url)
 
-        # Priority 1: pre-downloaded bytes from browser session
-        pre_bytes = info.pop("_bytes", None)
-        if pre_bytes:
-            fpath.write_bytes(pre_bytes)
-            logger.info(
-                f"[Feishu] Wrote pre-downloaded image {idx}: {fname}"
-            )
-            continue
-
-        # Priority 2: CDN download with authenticated headers
-        cdn_url = (
-            f"{origin}/space/api/box/stream/download/all/{token}/"
-        )
+        expected_size = 0
         try:
-            resp = http_get(
-                cdn_url,
-                cookies=cookies,
-                timeout=30,
-                headers=headers,
-            )
-            if resp.status_code == 200 and len(resp.content) > 100:
-                fpath.write_bytes(resp.content)
-                logger.info(f"[Feishu] Downloaded image {idx}: {fname}")
-            else:
-                logger.warning(
-                    f"[Feishu] CDN image download failed {token}: "
-                    f"status={resp.status_code}"
+            expected_size = int(info.get("size") or 0)
+        except (TypeError, ValueError):
+            pass
+
+        saved = False
+        for cdn_url in candidates:
+            try:
+                resp = http_get(
+                    cdn_url,
+                    cookies=cookies,
+                    timeout=120 if info.get("media_type") == "video" else 30,
+                    headers=headers,
                 )
-        except Exception as e:
-            logger.warning(f"[Feishu] CDN image download error {token}: {e}")
+            except Exception as e:
+                logger.warning(
+                    f"[Feishu] CDN media download error {token}: {e}"
+                )
+                continue
+            ctype = (resp.headers.get("content-type") or "").lower()
+            if (resp.status_code != 200 or not resp.content
+                    or "text/html" in ctype or "application/json" in ctype):
+                logger.warning(
+                    f"[Feishu] CDN media download failed {token}: "
+                    f"status={resp.status_code} type={ctype or 'unknown'} "
+                    f"url={cdn_url}"
+                )
+                continue
+            fpath.write_bytes(resp.content)
+            if expected_size and len(resp.content) != expected_size:
+                logger.info(
+                    f"[Feishu] Downloaded media {idx}: {fname} "
+                    f"({len(resp.content)} bytes; original is "
+                    f"{expected_size} bytes — transcoded variant)"
+                )
+            else:
+                logger.info(
+                    f"[Feishu] Downloaded media {idx}: {fname} "
+                    f"({len(resp.content)} bytes)"
+                )
+            saved = True
+            break
+        if not saved:
+            logger.warning(f"[Feishu] Media {idx} not saved: {fname}")
+
+
+def _download_images_via_api(att_dir: Path, images: List[dict]) -> None:
+    """Backward-compatible image-only helper."""
+    _download_media_via_api(att_dir, images)
+
+
+def _download_images_via_cdn(
+    att_dir: Path, images: List[dict], doc_url: str,
+) -> None:
+    """Backward-compatible image-only helper."""
+    _download_media_via_cdn(att_dir, images, doc_url)
 
 
 # ---------------------------------------------------------------------------

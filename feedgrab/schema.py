@@ -513,6 +513,8 @@ def from_feishu(data: dict) -> UnifiedContent:
             "cover_image": data.get("cover_image", ""),
             "images": data.get("images", []),
             "images_info": data.get("images_info", []),
+            "media": data.get("media", []),
+            "media_info": data.get("media_info", []),
             "img_subdir": data.get("img_subdir", ""),
         },
     )

@@ -246,19 +246,22 @@ class UniversalReader:
             # backward-compatible.
             setattr(content, "_feedgrab_saved_path", saved_path)
 
-            # Feishu: download images to {md_dir}/attachments/{subdir}/ after saving
-            if (saved_path
-                    and content.source_type == SourceType.FEISHU
-                    and content.extra.get("images_info")):
-                from feedgrab.config import feishu_download_images
-                if feishu_download_images():
-                    from feedgrab.fetchers.feishu import download_feishu_images
-                    download_feishu_images(
-                        saved_path,
-                        content.extra["images_info"],
-                        content.url,
-                        img_subdir=content.extra.get("img_subdir", ""),
-                    )
+            # Feishu: download media to {md_dir}/attachments/{subdir}/ after saving
+            if saved_path and content.source_type == SourceType.FEISHU:
+                media_info = (
+                    content.extra.get("media_info")
+                    or content.extra.get("images_info")
+                )
+                if media_info:
+                    from feedgrab.config import feishu_download_media
+                    if feishu_download_media():
+                        from feedgrab.fetchers.feishu import download_feishu_media
+                        download_feishu_media(
+                            saved_path,
+                            media_info,
+                            content.url,
+                            media_subdir=content.extra.get("img_subdir", ""),
+                        )
 
             # KDocs: download images to {md_dir}/attachments/{subdir}/ after saving
             if (saved_path

@@ -1261,6 +1261,26 @@ async def _evaluate_feishu_doc_on_page(
     if sheet_block_data:
         result["sheet_blocks"] = dict(sheet_block_data)
 
+    try:
+        media_urls = await page.evaluate(
+            """
+() => {
+  const out = {};
+  for (const el of document.querySelectorAll('video[src], audio[src]')) {
+    const src = el.getAttribute('src') || '';
+    const m = src.match(/\\/stream\\/download\\/(?:video|audio|all)\\/([^/?#]+)/);
+    if (m && m[1]) out[m[1]] = src;
+  }
+  return out;
+}
+"""
+        )
+        if media_urls:
+            result["_media_urls"] = media_urls
+            logger.info(f"[Feishu] Found {len(media_urls)} media URL(s) in DOM")
+    except Exception as e:
+        logger.debug(f"[Feishu] Media URL discovery skipped: {e}")
+
     # Collect pre-downloaded images from interceptor + JS fetch fallback
     try:
         from feedgrab.config import feishu_download_images

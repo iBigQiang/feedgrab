@@ -2,6 +2,43 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-07-06 · v0.26.5-dev · 飞书文档媒体本地化修复
+
+### 背景
+
+桌面端 v0.1.15 抓取飞书文档 `https://jcn11fio79id.feishu.cn/wiki/EuJowYkE6iM6fgk5Ykdc6boHnuh` 时，图片能保存到 `attachments/`，但源文档中的视频没有进入 Markdown，也没有生成本地附件。排查确认当前飞书链路只收集 `images_info` 并调用 `download_feishu_images()`，视频/文件类 block 未被渲染或下载。
+
+### 实施（第一轮 · Codex）
+
+- 扩展 `feedgrab/fetchers/feishu.py` 的 Block→Markdown 渲染：保留原 `images_info`，新增 `media_info`，支持 `file` / `video` / `audio` / `media` 以及 `fallback + snapshot.type=video` 等媒体 block。
+- 真实页面诊断确认飞书视频字段为 `type=file` + `snapshot.file.{token,mimeType,name,size,width,height}`，且视频 file block 可能嵌套在 heading/text 子块中；因此补齐 `text` / `heading` 的 children 渲染，避免子级视频被父块吞掉。
+- 修复表格单元格与 `synced_reference` / `fallback` 容器吞掉子级媒体 block 的渲染断链（表格渲染透传 `media/img_subdir/images`；容器保留嵌入块输出同时继续渲染 children）。
+- 浏览器提取阶段从 DOM `<video src=".../space/api/box/stream/download/video/{token}/?...">` 收集真实播放 URL，写入 `media_info.url`。
+- 视频输出为 Obsidian 可预览的 `<video controls src="attachments/{item_id}/xxx.mp4"></video>`；音频输出为 `<audio controls ...>`；其他文件输出为本地附件链接。
+- 新增 `download_feishu_media()`，复用飞书 Open API / CDN 下载路径，统一保存图片、视频、音频和附件到 `attachments/{item_id}/`；旧的 `download_feishu_images()` 保留兼容。
+- `FEISHU_DOWNLOAD_IMAGES` 继续作为旧配置键生效，新增 `feishu_download_media()` 兼容 `FEISHU_DOWNLOAD_MEDIA`，桌面设置文案改为"飞书媒体下载到本地"。
+- 不修改飞书 Sheet / 表格解码逻辑。
+
+### 实施（第二轮 · 实测修复）
+
+第一轮修复只通过了单元测试（Codex 沙箱访问飞书被网络拦截，真实 URL 端到端从未跑通），用户实测视频仍未保存。本轮真实实测两个含视频文档定位并修复三个遗留问题：
+
+- **下载 URL 优先级反了**：第一轮"优先 DOM 播放 URL"实测拿到的是飞书转码预览版（22.4MB 的 `.mov` 原件只下到 4MB 转码流）。改为原始文件端点 `/space/api/box/stream/download/all/{token}/` 优先（实测返回与原件逐字节一致），DOM 播放流 URL 仅作兜底（含相对路径补全）。
+- **响应有效性校验**：下载只接受 `status=200` 且 content-type 非 `text/html` / `application/json`（防止登录页/错误 JSON 被写成 `.mp4`）；移除对 206 部分响应的接受（避免残片文件）。
+- **下载日志不可见**：`feishu.py` 用 std `logging`（无 handler，INFO 被吞），CLI/桌面端看不到任何下载动静，用户无法确认是否成功。统一换成 loguru，`Downloaded media N: xxx (N bytes)` 全程可见；`_get_media_info` 补提取 `size`，下载大小与原件不一致时日志明确标注 transcoded variant。
+
+### 验证结果
+
+- `python -m pytest tests/test_feishu_wiki.py tests/test_feishu_sheet_decode.py -q`：17 passed（含新增"原始 URL 优先"与"回退 DOM 流 URL"两用例）。
+- `python -m pytest tests -q`：358 passed。
+- **实测 `EuJowYkE6iM6fgk5Ykdc6boHnuh`**：4 视频 + 3 图片全部落地，4 个 mp4 与飞书原件逐字节一致（4667460 / 4224672 / 5071178 / 6718760 bytes），ftyp/moov/mdat box 结构完整可播放，Markdown 内 4 个 `<video>` 引用与文件一一对应。
+- **实测 `YTnpw38qhidAqAkYkL9cKPRpnKf`**：2 视频（含 `.mov`）+ 2 图片全部落地，`.mov` 由第一轮的 4MB 转码版修复为 22403461 bytes 原件。
+- **桌面端同链路验证**：`FetchService.fetch_url()`（桌面端 worker 实际调用路径）实测 `ok=True`，视频原件落地一致。
+
+### 状态：已完成 ✅（实测视频落地验证通过）
+
+---
+
 ## 2026-07-05 · v0.26.5-dev · 桌面端 0.1.15 侧边栏版本号样式修复 + OBSIDIAN_VAULT 迁移保留发布
 
 ### 背景

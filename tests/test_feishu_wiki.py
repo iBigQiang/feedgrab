@@ -170,3 +170,382 @@ def test_blocks_to_markdown_uses_snapshot_row_and_column_ids_for_feishu_tables()
         "| --- | --- | --- |\n"
         "| 值A | 值B | 值C |"
     )
+
+
+def test_blocks_to_markdown_renders_video_file_as_local_preview():
+    blocks = [
+        {
+            "type": "file",
+            "children": [],
+            "file": {
+                "token": "boxcnVideoToken",
+                "name": "完整上传教程.mp4",
+                "mime_type": "video/mp4",
+            },
+        }
+    ]
+    media = []
+
+    md = blocks_to_markdown(blocks, media=media, img_subdir="doc123")
+
+    assert md == (
+        '<video controls src="attachments/doc123/001_完整上传教程.mp4">'
+        "</video>"
+    )
+    assert media == [
+        {
+            "token": "boxcnVideoToken",
+            "name": "完整上传教程.mp4",
+            "mime_type": "video/mp4",
+            "size": 0,
+            "media_type": "video",
+            "_filename": "001_完整上传教程.mp4",
+        }
+    ]
+
+
+def test_blocks_to_markdown_renders_nested_video_file_under_heading():
+    blocks = [
+        {
+            "type": "heading3",
+            "children": [
+                {
+                    "type": "file",
+                    "children": [],
+                    "snapshot": {
+                        "type": "file",
+                        "file": {
+                            "token": "YEx5bBnPWoWBLixZFt0cEny2nQd",
+                            "mimeType": "video/mp4",
+                            "name": "565450a9c3d4a6785e9ba13f29a6ba14.mp4",
+                        },
+                    },
+                }
+            ],
+            "zoneState": {
+                "allText": "完整上传教程\n",
+                "content": {
+                    "ops": [
+                        {"insert": "完整上传教程", "attributes": {}},
+                        {"insert": "\n", "attributes": {"fixEnter": "true"}},
+                    ]
+                },
+            },
+            "snapshot": {"type": "heading3"},
+        }
+    ]
+    media = []
+
+    md = blocks_to_markdown(blocks, media=media, img_subdir="doc123")
+
+    assert md == (
+        "### 完整上传教程\n\n"
+        '<video controls src="attachments/doc123/'
+        '001_565450a9c3d4a6785e9ba13f29a6ba14.mp4"></video>'
+    )
+    assert media[0]["token"] == "YEx5bBnPWoWBLixZFt0cEny2nQd"
+    assert media[0]["mime_type"] == "video/mp4"
+    assert media[0]["media_type"] == "video"
+
+
+def test_blocks_to_markdown_renders_fallback_video_snapshot_as_local_preview():
+    blocks = [
+        {
+            "type": "fallback",
+            "children": [],
+            "snapshot": {
+                "type": "video",
+                "fileToken": "boxcnFallbackVideo",
+                "fileName": "转码演示.mp4",
+                "mimeType": "video/mp4",
+            },
+        }
+    ]
+    media = []
+
+    md = blocks_to_markdown(blocks, media=media, img_subdir="doc123")
+
+    assert md == (
+        '<video controls src="attachments/doc123/001_转码演示.mp4">'
+        "</video>"
+    )
+    assert media[0]["token"] == "boxcnFallbackVideo"
+    assert media[0]["media_type"] == "video"
+
+
+def test_blocks_to_markdown_collects_video_file_in_table_cell():
+    blocks = [
+        {
+            "type": "table",
+            "children": [
+                {
+                    "type": "table_cell",
+                    "children": [
+                        {
+                            "type": "text",
+                            "children": [
+                                {
+                                    "type": "file",
+                                    "children": [],
+                                    "snapshot": {
+                                        "type": "file",
+                                        "file": {
+                                            "token": "HeDEbOzoYoEDBTx50aWcAGqlnBe",
+                                            "mimeType": "video/mp4",
+                                            "name": "微信视频2026-06-17_203024_102.mp4",
+                                        },
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+            "snapshot": {
+                "type": "table",
+                "rows_id": ["row1"],
+                "columns_id": ["col1"],
+            },
+        }
+    ]
+    media = []
+
+    md = blocks_to_markdown(blocks, media=media, img_subdir="doc123")
+
+    assert (
+        '<video controls src="attachments/doc123/'
+        '001_微信视频2026-06-17_203024_102.mp4"></video>'
+    ) in md
+    assert media[0]["token"] == "HeDEbOzoYoEDBTx50aWcAGqlnBe"
+    assert media[0]["media_type"] == "video"
+
+
+def test_blocks_to_markdown_preserves_table_cell_text_before_video():
+    blocks = [
+        {
+            "type": "table",
+            "children": [
+                {
+                    "type": "table_cell",
+                    "zoneState": {
+                        "allText": "教程视频\n",
+                        "content": {"ops": [{"insert": "教程视频"}]},
+                    },
+                    "children": [
+                        {
+                            "type": "file",
+                            "children": [],
+                            "snapshot": {
+                                "type": "file",
+                                "file": {
+                                    "token": "HeDEbOzoYoEDBTx50aWcAGqlnBe",
+                                    "mimeType": "video/mp4",
+                                    "name": "demo.mp4",
+                                },
+                            },
+                        }
+                    ],
+                }
+            ],
+            "snapshot": {
+                "type": "table",
+                "rows_id": ["row1"],
+                "columns_id": ["col1"],
+            },
+        }
+    ]
+    media = []
+
+    md = blocks_to_markdown(blocks, media=media, img_subdir="doc123")
+
+    assert (
+        "| 教程视频<br>"
+        '<video controls src="attachments/doc123/001_demo.mp4"></video> |'
+    ) in md
+    assert media[0]["token"] == "HeDEbOzoYoEDBTx50aWcAGqlnBe"
+
+
+def test_blocks_to_markdown_renders_children_under_synced_container():
+    blocks = [
+        {
+            "type": "synced_reference",
+            "children": [
+                {
+                    "type": "file",
+                    "children": [],
+                    "snapshot": {
+                        "type": "file",
+                        "file": {
+                            "token": "YEx5bBnPWoWBLixZFt0cEny2nQd",
+                            "mimeType": "video/mp4",
+                            "name": "565450a9c3d4a6785e9ba13f29a6ba14.mp4",
+                        },
+                    },
+                }
+            ],
+            "snapshot": {"type": "synced_reference"},
+        }
+    ]
+    media = []
+
+    md = blocks_to_markdown(blocks, media=media, img_subdir="doc123")
+
+    assert md == (
+        '<video controls src="attachments/doc123/'
+        '001_565450a9c3d4a6785e9ba13f29a6ba14.mp4"></video>'
+    )
+    assert media[0]["token"] == "YEx5bBnPWoWBLixZFt0cEny2nQd"
+
+
+def test_download_feishu_media_writes_pre_downloaded_video_bytes(tmp_path, monkeypatch):
+    from feedgrab.fetchers.feishu import download_feishu_media
+
+    monkeypatch.setattr("feedgrab.fetchers.feishu._is_api_available", lambda: False)
+
+    md_path = tmp_path / "doc.md"
+    md_path.write_text("# doc", encoding="utf-8")
+
+    download_feishu_media(
+        str(md_path),
+        [
+            {
+                "token": "boxcnVideoToken",
+                "name": "完整上传教程.mp4",
+                "mime_type": "video/mp4",
+                "media_type": "video",
+                "_filename": "001_完整上传教程.mp4",
+                "_bytes": b"video-bytes",
+            }
+        ],
+        "https://example.feishu.cn/wiki/doc",
+        media_subdir="doc123",
+    )
+
+    assert (
+        tmp_path / "attachments" / "doc123" / "001_完整上传教程.mp4"
+    ).read_bytes() == b"video-bytes"
+
+
+def test_download_feishu_media_prefers_original_file_url(
+    tmp_path, monkeypatch
+):
+    """原始文件端点 /download/all/ 优先；DOM 播放流 URL 是转码预览，不应抢先。"""
+    from feedgrab.fetchers.feishu import download_feishu_media
+
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    (session_dir / "feishu.json").write_text(
+        '{"cookies":[{"name":"_csrf_token","value":"csrf"}]}',
+        encoding="utf-8",
+    )
+    requested = []
+
+    class Response:
+        status_code = 200
+        content = b"original-file-bytes"
+        headers = {"content-type": "video/mp4"}
+
+    def fake_get(url, **kwargs):
+        requested.append(url)
+        return Response()
+
+    monkeypatch.setattr("feedgrab.fetchers.feishu._is_api_available", lambda: False)
+    monkeypatch.setattr("feedgrab.fetchers.feishu.get_session_dir", lambda: session_dir)
+    monkeypatch.setattr("feedgrab.utils.http_client.get", fake_get)
+
+    md_path = tmp_path / "doc.md"
+    md_path.write_text("# doc", encoding="utf-8")
+    video_url = (
+        "https://internal-api-drive-stream.feishu.cn/space/api/box/stream/"
+        "download/video/HeDEbOzoYoEDBTx50aWcAGqlnBe/"
+        "?quality=720p&data_version=7652524667739049193&mount_point=docx_file"
+    )
+
+    download_feishu_media(
+        str(md_path),
+        [
+            {
+                "token": "HeDEbOzoYoEDBTx50aWcAGqlnBe",
+                "name": "微信视频2026-06-17_203024_102.mp4",
+                "mime_type": "video/mp4",
+                "media_type": "video",
+                "_filename": "001_video.mp4",
+                "url": video_url,
+            }
+        ],
+        "https://example.feishu.cn/wiki/doc",
+        media_subdir="doc123",
+    )
+
+    assert requested == [
+        "https://example.feishu.cn/space/api/box/stream/download/all/"
+        "HeDEbOzoYoEDBTx50aWcAGqlnBe/"
+    ]
+    assert (
+        tmp_path / "attachments" / "doc123" / "001_video.mp4"
+    ).read_bytes() == b"original-file-bytes"
+
+
+def test_download_feishu_media_falls_back_to_discovered_video_url(
+    tmp_path, monkeypatch
+):
+    """原始文件端点被拒（如返回 JSON 错误）时，回退 DOM 收集的播放流 URL。"""
+    from feedgrab.fetchers.feishu import download_feishu_media
+
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    (session_dir / "feishu.json").write_text(
+        '{"cookies":[{"name":"_csrf_token","value":"csrf"}]}',
+        encoding="utf-8",
+    )
+    requested = []
+
+    class DeniedResponse:
+        status_code = 200
+        content = b'{"code":1001,"msg":"forbidden"}'
+        headers = {"content-type": "application/json"}
+
+    class StreamResponse:
+        status_code = 200
+        content = b"video-from-stream-url"
+        headers = {"content-type": "video/mp4"}
+
+    def fake_get(url, **kwargs):
+        requested.append(url)
+        if "/download/all/" in url:
+            return DeniedResponse()
+        return StreamResponse()
+
+    monkeypatch.setattr("feedgrab.fetchers.feishu._is_api_available", lambda: False)
+    monkeypatch.setattr("feedgrab.fetchers.feishu.get_session_dir", lambda: session_dir)
+    monkeypatch.setattr("feedgrab.utils.http_client.get", fake_get)
+
+    md_path = tmp_path / "doc.md"
+    md_path.write_text("# doc", encoding="utf-8")
+    video_url = (
+        "https://internal-api-drive-stream.feishu.cn/space/api/box/stream/"
+        "download/video/HeDEbOzoYoEDBTx50aWcAGqlnBe/?quality=720p"
+    )
+
+    download_feishu_media(
+        str(md_path),
+        [
+            {
+                "token": "HeDEbOzoYoEDBTx50aWcAGqlnBe",
+                "name": "微信视频2026-06-17_203024_102.mp4",
+                "mime_type": "video/mp4",
+                "media_type": "video",
+                "_filename": "001_video.mp4",
+                "url": video_url,
+            }
+        ],
+        "https://example.feishu.cn/wiki/doc",
+        media_subdir="doc123",
+    )
+
+    assert len(requested) == 2
+    assert "/download/all/" in requested[0]
+    assert requested[1] == video_url
+    assert (
+        tmp_path / "attachments" / "doc123" / "001_video.mp4"
+    ).read_bytes() == b"video-from-stream-url"

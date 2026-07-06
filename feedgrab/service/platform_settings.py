@@ -382,7 +382,7 @@ PLATFORM_SETTINGS_SCHEMA = PlatformSettingsSchema(
                 PlatformSettingField("FEISHU_APP_SECRET", "secret", "飞书 App Secret", "feishu", secret=True),
                 PlatformSettingField("FEISHU_CDP_ENABLED", "boolean", "飞书复用 Chrome CDP", "feishu", False),
                 PlatformSettingField("FEISHU_WIKI_DELAY", "number", "飞书知识库批量间隔秒数", "feishu", 2.0),
-                PlatformSettingField("FEISHU_DOWNLOAD_IMAGES", "boolean", "飞书图片下载到本地", "feishu", False),
+                PlatformSettingField("FEISHU_DOWNLOAD_IMAGES", "boolean", "飞书媒体下载到本地", "feishu", False),
                 PlatformSettingField("FEISHU_PAGE_LOAD_TIMEOUT", "integer", "飞书页面等待毫秒", "feishu", 5000),
                 PlatformSettingField("FEISHU_CUSTOM_DOMAINS", "string", "飞书私有化域名", "feishu", "", description="多个域名用英文逗号分隔"),
                 PlatformSettingField("KDOCS_CDP_ENABLED", "boolean", "金山文档复用 Chrome CDP", "feishu", True),
