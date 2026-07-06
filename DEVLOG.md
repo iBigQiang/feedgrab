@@ -2,6 +2,37 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-07-06 · v0.26.5-dev · 桌面端 0.1.16 飞书媒体本地化修复发布
+
+### 背景
+
+`feedgrab-desktop` 分支完成飞书文档视频/媒体本地化两轮修复并实测通过后（详见下一条目），按桌面端专用收尾流程发布新的 Windows 预览安装包，让普通用户拿到修复。主分支 `main` 本轮不改动。
+
+### 实施
+
+- 桌面端安装包版本递增到 `0.1.16`，重新生成普通用户 NSIS 安装器。
+- 随包带上飞书媒体修复：视频/音频/附件下载到 `attachments/`、原始文件端点优先、下载日志可见、响应有效性校验（细节见下一条目）。
+- 同步 `desktop/tests/App.test.tsx` 侧边栏作者行顺序断言（仓库行在前、推特行在后，与工作区 App.tsx 实际顺序一致）。
+- GitHub Release notes 使用中文完整说明，并回填真实 `browser_download_url`。
+- 更新 `desktop/README.md` → 覆盖根 `README.md`、`README_en.md` 下载入口、`docs/feedgrab-desktop-packaging.md` 发布信息表。
+
+### 验证结果
+
+- `desktop`: `npm test`：83 passed（含更新后的作者行顺序断言）。
+- `desktop`: `npm run lint`：通过。
+- `desktop`: `npm run build`：通过。
+- `python -m pytest tests/test_service_desktop.py tests/test_worker_protocol.py tests/test_service_layer.py tests/test_feishu_wiki.py tests/test_feishu_sheet_decode.py -q`：122 passed。
+- `desktop`: `npm run pack:user`：成功生成 `D:\AiCode\feedgrab\desktop\release-packages\20260706-190917\feedgrab-desktop-setup-0.1.16.exe`。
+- 安装包大小：`376921707` bytes。
+- 安装包 SHA256：`26698FD25B641221FF18993EB8B90356384A0FA06CC3F06F74D850B162705AA0`。
+- 安装包签名状态：未签名。
+- GitHub Release：`desktop-v0.1.16-20260706`，asset `feedgrab-desktop-setup-0.1.16.exe` 已上传。
+- 下载地址核验：GitHub API 返回的 `browser_download_url` 为 `https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.16-20260706/feedgrab-desktop-setup-0.1.16.exe`，`curl.exe -I -L` 最终返回 `200 OK`，`Content-Length: 376921707`。
+
+### 状态：已完成 ✅
+
+---
+
 ## 2026-07-06 · v0.26.5-dev · 飞书文档媒体本地化修复
 
 ### 背景
