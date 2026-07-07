@@ -2,6 +2,38 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-07-07 · v0.26.5-dev · 桌面端 0.1.17 版本更新通知功能发布
+
+### 背景
+
+`feedgrab-desktop` 分支完成版本更新通知功能开发和诊断页误报修复后，按桌面端专用收尾流程发布新的 Windows 预览安装包。本次新增客户端内置版本检查和一键静默升级能力，并修复打包运行时下诊断页"安装/更新所有依赖"的误报问题。主分支 `main` 本轮不改动。
+
+### 实施
+
+- 新增 `desktop/electron/updater.ts`：通过 GitHub Releases API 检查最新版本，对比当前版本号，发现新版本后下载 NSIS 安装包并静默安装（`/S` 参数），安装期间保留 `sessions/` 和 `output/` 目录（依赖 `installer.nsh` 已有的静默模式数据保留逻辑）。
+- 新增 IPC 通道 `feedgrab:checkForUpdates` / `feedgrab:downloadAndInstallUpdate` / `feedgrab:updateProgress`，preload 桥接到渲染进程。
+- 侧边栏底部版本号旁添加"更新"按钮：每日首次打开自动检查（`localStorage` 记录当日已检查），发现新版本时按钮高亮，点击弹窗显示发布说明，一键下载安装。
+- 检查结果提示从右上角 Toast 改为版本号上方气泡显示，3 秒后自动消失。
+- 修复诊断页误报：`repairDoctor("all")` 在打包运行时下先调用 `this.doctor()` 预检查，全部正常时直接返回成功，不再无条件返回 `bundled_worker_runtime` 失败。
+- 界面文案优化："版本号"改为"版本"，"检查更新"改为"更新"。
+- `ship-desktop.md` 补充禁止手动分步打包或跳过 `runtime:build` 的规则。
+
+### 验证结果
+
+- `desktop`: `npm test`：83 passed。
+- `desktop`: `npm run lint`：通过（0 warnings）。
+- `desktop`: `npm run build`：typecheck + vite build + tsc electron 全通过。
+- `desktop`: `npm run pack:user`：成功生成 `feedgrab-desktop-setup-0.1.17.exe`。
+- 安装包大小：`376924974` bytes。
+- 安装包 SHA256：`AFED1EB23CA73BE0049F5636608BDDEE4C30E79FB4E34C43B8E57004A698C897`。
+- 安装包签名状态：未签名。
+- GitHub Release：`desktop-v0.1.17-20260707`，asset `feedgrab-desktop-setup-0.1.17.exe` 已上传。
+- 下载地址核验：GitHub API 返回的 `browser_download_url` 为 `https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.17-20260707/feedgrab-desktop-setup-0.1.17.exe`，`curl.exe -I -L` 最终返回 `200 OK`，`Content-Length: 376924974`。
+
+### 状态：已完成 ✅
+
+---
+
 ## 2026-07-06 · v0.26.5-dev · 桌面端 0.1.16 飞书媒体本地化修复发布
 
 ### 背景
