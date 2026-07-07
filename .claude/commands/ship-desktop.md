@@ -66,6 +66,8 @@ cd D:\AiCode\feedgrab\desktop
 & 'D:\nodejs\npm.cmd' run pack:user
 ```
 
+> **禁止手动分步打包或跳过 runtime:build。** `npm run pack:user` 已通过 `&&` 串联内含三步：`build`（编译 TypeScript/Vite）→ `runtime:build`（重建 Python worker + Chromium 运行时）→ `package-windows.ps1 -SkipRuntimeBuild`（打包 exe）。直接单独运行 `package-windows.ps1 -SkipRuntimeBuild` 或跳过 `runtime:build` 会导致安装包中的 Python worker 还是旧版本，修改不生效。
+
 打包后确认最新产物：
 
 ```powershell

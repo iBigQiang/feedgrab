@@ -37,7 +37,7 @@ describe("App", () => {
     expect(screen.getByText("赞助")).toBeInTheDocument();
     expect(screen.getByText("社群")).toBeInTheDocument();
     expect(screen.queryByText("授权")).not.toBeInTheDocument();
-    expect(screen.getByText(/版本号：v0\.1\.\d+/)).toBeInTheDocument();
+    expect(screen.getByText(/版本：v0\.1\.\d+/)).toBeInTheDocument();
     expect(screen.getByText("强子手记").closest(".author-row")).toHaveTextContent("作者：强子手记");
     expect(screen.getByRole("link", { name: "@iBigQiang" })).toHaveAttribute("href", "https://x.com/iBigQiang");
     expect(screen.queryByText("商业化 GUI 客户端分支")).not.toBeInTheDocument();
@@ -1632,6 +1632,18 @@ function createTestApi(overrides: Partial<FeedgrabIpcApi> = {}): FeedgrabIpcApi 
     openPath: vi.fn().mockResolvedValue({ ok: true }),
     chooseOutputDirectory: vi.fn().mockResolvedValue({ ok: true, path: INSTALL_OUTPUT_DIR }),
     fetchRemoteMarkdown: vi.fn().mockResolvedValue({ ok: false, error: "offline" }),
+    checkForUpdates: vi.fn().mockResolvedValue({
+      hasUpdate: false,
+      latestVersion: "0.1.16",
+      currentVersion: "0.1.16",
+      downloadUrl: "",
+      releasePageUrl: "",
+      releaseNotes: "",
+      publishedAt: "",
+      isPortable: false
+    }),
+    downloadAndInstallUpdate: vi.fn().mockResolvedValue({ ok: false, error: "test" }),
+    onUpdateProgress: vi.fn(() => () => undefined),
     onWorkerEvent: vi.fn(() => () => undefined),
     ...overrides
   };

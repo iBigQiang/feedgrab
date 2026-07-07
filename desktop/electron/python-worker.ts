@@ -657,6 +657,19 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
       };
     }
     if (action === "all") {
+      if (!this.canRunPythonModuleCommands()) {
+        const snapshot = await this.doctor();
+        const checks = snapshot.checks ?? [];
+        const notOk = checks.filter((c) => c.status !== "ok" && c.repair && c.repair.available !== false);
+        return {
+          ok: notOk.length === 0,
+          action,
+          message: notOk.length === 0
+            ? "所有依赖已安装"
+            : `当前为打包运行时，以下依赖需通过新版安装包更新：${notOk.map((c) => c.label).join("、")}`,
+          error: notOk.length === 0 ? undefined : "bundled_worker_runtime"
+        };
+      }
       const results = await Promise.all([this.installPythonDependencies(), this.installPlaywrightChromium()]);
       const failed = results.find((result) => !result.ok);
       return {
@@ -668,7 +681,29 @@ class JsonLinePythonWorkerClient implements PythonWorkerClient {
       };
     }
     if (action === "python-dependencies") {
+      if (!this.canRunPythonModuleCommands()) {
+        const snapshot = await this.doctor();
+        const pyChecks = (snapshot.checks ?? []).filter((c) => c.name.startsWith("import:"));
+        const allOk = pyChecks.length > 0 && pyChecks.every((c) => c.status === "ok");
+        return {
+          ok: allOk,
+          action: "python-dependencies",
+          message: allOk ? "Python 依赖已安装" : "当前为打包运行时，Python 依赖需要通过新版安装包更新",
+          error: allOk ? undefined : "bundled_worker_runtime"
+        };
+      }
       return this.installPythonDependencies();
+    }
+    if (!this.canRunPythonModuleCommands()) {
+      const snapshot = await this.doctor();
+      const browserCheck = (snapshot.checks ?? []).find((c) => c.name === "browser");
+      const ok = browserCheck?.status === "ok";
+      return {
+        ok,
+        action: "playwright-browsers",
+        message: ok ? "浏览器已安装" : "当前为打包运行时，请使用包含 Chromium 的新版安装包更新",
+        error: ok ? undefined : "bundled_worker_runtime"
+      };
     }
     return this.installPlaywrightChromium();
   }

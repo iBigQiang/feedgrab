@@ -6,7 +6,8 @@ import type {
   FetchRequest,
   LoginStatusRequest,
   SettingsFieldValue,
-  SupportedPlatform
+  SupportedPlatform,
+  UpdateDownloadProgress
 } from "./ipc-types.js";
 
 const api: FeedgrabIpcApi = {
@@ -43,6 +44,17 @@ const api: FeedgrabIpcApi = {
     ipcRenderer.invoke("feedgrab:chooseOutputDirectory", options) as ReturnType<FeedgrabIpcApi["chooseOutputDirectory"]>,
   fetchRemoteMarkdown: (url: string) =>
     ipcRenderer.invoke("feedgrab:fetchRemoteMarkdown", url) as ReturnType<FeedgrabIpcApi["fetchRemoteMarkdown"]>,
+  checkForUpdates: () =>
+    ipcRenderer.invoke("feedgrab:checkForUpdates") as ReturnType<FeedgrabIpcApi["checkForUpdates"]>,
+  downloadAndInstallUpdate: (downloadUrl: string) =>
+    ipcRenderer.invoke("feedgrab:downloadAndInstallUpdate", downloadUrl) as ReturnType<
+      FeedgrabIpcApi["downloadAndInstallUpdate"]
+    >,
+  onUpdateProgress: (callback: (progress: UpdateDownloadProgress) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, progress: UpdateDownloadProgress) => callback(progress);
+    ipcRenderer.on("feedgrab:updateProgress", listener);
+    return () => ipcRenderer.removeListener("feedgrab:updateProgress", listener);
+  },
   onWorkerEvent: (callback: (event: FeedgrabWorkerEvent) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, workerEvent: FeedgrabWorkerEvent) => callback(workerEvent);
     ipcRenderer.on("feedgrab:workerEvent", listener);

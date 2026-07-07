@@ -14,7 +14,8 @@ import type {
   SettingsFieldValue,
   SettingsSchema,
   SettingsSnapshot,
-  SupportedPlatform
+  SupportedPlatform,
+  UpdateCheckResult
 } from "../../electron/ipc-types";
 import {
   appReducer,
@@ -245,6 +246,11 @@ export function App(): ReactElement {
   const [loginImportResult, setLoginImportResult] = useState<LoginSessionImportResult | undefined>();
   const [toast, setToast] = useState<{ message: string; tone: "info" | "success" | "warning" | "error" } | undefined>();
   const [repairingDoctor, setRepairingDoctor] = useState("");
+  const [updateState, setUpdateState] = useState<"idle" | "checking" | "downloading" | "installing">("idle");
+  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | undefined>();
+  const [downloadPercent, setDownloadPercent] = useState(0);
+  const [showUpdateDialog, setShowUpdateDialog] = useState(false);
+  const [updateBubble, setUpdateBubble] = useState<{ message: string; tone: "success" | "error" } | undefined>();
   const api = useMemo(() => resolveFeedgrabApi(), []);
 
   useEffect(() => {
@@ -299,6 +305,44 @@ export function App(): ReactElement {
     const timer = window.setTimeout(() => setToast(undefined), 2000);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    if (!updateBubble) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setUpdateBubble(undefined), 3000);
+    return () => window.clearTimeout(timer);
+  }, [updateBubble]);
+
+  useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const lastCheck = localStorage.getItem("feedgrab.lastUpdateCheck");
+    if (lastCheck === today) {
+      return;
+    }
+    localStorage.setItem("feedgrab.lastUpdateCheck", today);
+    let cancelled = false;
+    void api
+      .checkForUpdates()
+      .then((result) => {
+        if (!cancelled) {
+          setUpdateInfo(result);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
+
+  useEffect(() => {
+    return api.onUpdateProgress((progress) => {
+      setDownloadPercent(progress.percent);
+      if (progress.percent >= 100) {
+        setUpdateState("installing");
+      }
+    });
+  }, [api]);
 
   const fetchPlan = useMemo(
     () =>
@@ -473,6 +517,64 @@ export function App(): ReactElement {
       .finally(() => setRepairingDoctor(""));
   }
 
+  function handleCheckForUpdates(silent: boolean): void {
+    setUpdateState("checking");
+    void api
+      .checkForUpdates()
+      .then((result) => {
+        setUpdateInfo(result);
+        setUpdateState("idle");
+        if (result.error) {
+          if (!silent) {
+            setUpdateBubble({ message: `检查失败：${result.error}`, tone: "error" });
+          }
+          return;
+        }
+        if (result.hasUpdate) {
+          setShowUpdateDialog(true);
+        } else {
+          if (!silent) {
+            setUpdateBubble({ message: `已是最新版本 v${result.currentVersion}`, tone: "success" });
+          }
+        }
+      })
+      .catch((error: unknown) => {
+        setUpdateState("idle");
+        if (!silent) {
+          setUpdateBubble({
+            message: error instanceof Error ? `检查失败：${error.message}` : "检查更新失败",
+            tone: "error"
+          });
+        }
+      });
+  }
+
+  function handleDownloadAndInstall(): void {
+    if (!updateInfo?.downloadUrl) {
+      showToast("下载地址无效", "error");
+      return;
+    }
+    if (updateInfo.isPortable) {
+      window.open(updateInfo.releasePageUrl, "_blank", "noreferrer");
+      return;
+    }
+    setShowUpdateDialog(false);
+    setUpdateState("downloading");
+    setDownloadPercent(0);
+    void api
+      .downloadAndInstallUpdate(updateInfo.downloadUrl)
+      .then((result) => {
+        if (!result.ok) {
+          setUpdateState("idle");
+          showToast(result.error ?? "下载安装失败", "error");
+        }
+      })
+      .catch((error: unknown) => {
+        setUpdateState("idle");
+        showToast(error instanceof Error ? `更新失败：${error.message}` : "更新失败", "error");
+      });
+  }
+
   function updateSetting(name: string, value: SettingsFieldValue): void {
     dispatch({ type: "settings/edit", payload: { name, value } });
   }
@@ -539,7 +641,29 @@ export function App(): ReactElement {
           ))}
         </nav>
         <div className="sidebar-footer">
-          {desktopVersion ? <div className="sidebar-version">版本号：v{desktopVersion}</div> : null}
+          {desktopVersion ? (
+            <div className="sidebar-version">
+              {updateBubble ? (
+                <div className={`update-bubble update-bubble-${updateBubble.tone}`}>{updateBubble.message}</div>
+              ) : null}
+              <span className="version-text">版本：v{desktopVersion}</span>
+              {updateState === "checking" ? (
+                <button type="button" className="update-btn" disabled>检查中...</button>
+              ) : updateState === "downloading" ? (
+                <button type="button" className="update-btn" disabled>下载中 {downloadPercent}%</button>
+              ) : updateState === "installing" ? (
+                <button type="button" className="update-btn" disabled>安装中...</button>
+              ) : updateInfo?.hasUpdate ? (
+                <button type="button" className="update-btn update-available" onClick={() => setShowUpdateDialog(true)}>
+                  更新
+                </button>
+              ) : (
+                <button type="button" className="update-btn" onClick={() => handleCheckForUpdates(false)}>
+                  更新
+                </button>
+              )}
+            </div>
+          ) : null}
           <div className="author-panel">
             <div className="author-row">
               <span className="author-label">作者：</span>
@@ -652,6 +776,50 @@ export function App(): ReactElement {
         {state.selectedView === "sponsor" ? <SponsorView /> : null}
         {state.selectedView === "auth" ? <AuthView /> : null}
       </main>
+      {showUpdateDialog && updateInfo ? (
+        <UpdateDialog
+          updateInfo={updateInfo}
+          onInstall={handleDownloadAndInstall}
+          onClose={() => setShowUpdateDialog(false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function UpdateDialog(props: {
+  updateInfo: UpdateCheckResult;
+  onInstall: () => void;
+  onClose: () => void;
+}): ReactElement {
+  const { updateInfo: info, onInstall, onClose } = props;
+  return (
+    <div className="update-dialog-overlay" onClick={onClose}>
+      <div className="update-dialog" onClick={(e) => e.stopPropagation()}>
+        <div className="update-dialog-header">
+          <h2 className="update-dialog-title">发现新版本 v{info.latestVersion}</h2>
+          <button type="button" className="update-dialog-close" onClick={onClose} aria-label="关闭">×</button>
+        </div>
+        <div className="update-dialog-body">
+          <p className="update-dialog-meta">
+            当前版本：v{info.currentVersion} → 最新版本：v{info.latestVersion}
+          </p>
+          {info.publishedAt ? (
+            <p className="update-dialog-meta">发布时间：{new Date(info.publishedAt).toLocaleDateString("zh-CN")}</p>
+          ) : null}
+          {info.releaseNotes ? (
+            <div className="update-dialog-notes">
+              <pre className="update-dialog-pre">{info.releaseNotes}</pre>
+            </div>
+          ) : null}
+        </div>
+        <div className="update-dialog-footer">
+          <button type="button" className="secondary-action" onClick={onClose}>稍后</button>
+          <button type="button" className="primary-action" onClick={onInstall}>
+            {info.isPortable ? "前往下载" : "立即更新"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2893,7 +3061,10 @@ function createUnavailableApi(): FeedgrabIpcApi {
     openPath: unavailable as FeedgrabIpcApi["openPath"],
     chooseOutputDirectory: unavailable as FeedgrabIpcApi["chooseOutputDirectory"],
     fetchRemoteMarkdown: unavailable as FeedgrabIpcApi["fetchRemoteMarkdown"],
-    onWorkerEvent: () => () => undefined
+    checkForUpdates: unavailable as FeedgrabIpcApi["checkForUpdates"],
+    downloadAndInstallUpdate: unavailable as FeedgrabIpcApi["downloadAndInstallUpdate"],
+    onWorkerEvent: () => () => undefined,
+    onUpdateProgress: () => () => undefined
   };
 }
 
@@ -3075,6 +3246,24 @@ function createFallbackApi(): FeedgrabIpcApi {
         markdown: response.ok ? await response.text() : undefined,
         error: response.ok ? undefined : `HTTP ${response.status}`
       }));
+    },
+    checkForUpdates() {
+      return Promise.resolve({
+        hasUpdate: false,
+        latestVersion: desktopVersion,
+        currentVersion: desktopVersion,
+        downloadUrl: "",
+        releasePageUrl: "",
+        releaseNotes: "",
+        publishedAt: "",
+        isPortable: false
+      });
+    },
+    downloadAndInstallUpdate() {
+      return Promise.resolve({ ok: false, error: "mock 环境不支持自动更新" });
+    },
+    onUpdateProgress() {
+      return () => undefined;
     }
   };
 }

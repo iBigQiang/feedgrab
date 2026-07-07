@@ -254,6 +254,24 @@ export type ChromeCdpEnsureResult = {
   error?: string;
 };
 
+export type UpdateCheckResult = {
+  hasUpdate: boolean;
+  latestVersion: string;
+  currentVersion: string;
+  downloadUrl: string;
+  releasePageUrl: string;
+  releaseNotes: string;
+  publishedAt: string;
+  isPortable: boolean;
+  error?: string;
+};
+
+export type UpdateDownloadProgress = {
+  percent: number;
+  downloadedBytes: number;
+  totalBytes: number;
+};
+
 export type FeedgrabIpcApi = {
   ping: () => Promise<WorkerPing>;
   detectPlatform: (url: string) => Promise<SupportedPlatform>;
@@ -273,4 +291,7 @@ export type FeedgrabIpcApi = {
   chooseOutputDirectory: (options?: DirectorySelectionOptions) => Promise<DirectorySelectionResult>;
   fetchRemoteMarkdown: (url: string) => Promise<RemoteMarkdownResult>;
   onWorkerEvent: (callback: (event: FeedgrabWorkerEvent) => void) => () => void;
+  checkForUpdates: () => Promise<UpdateCheckResult>;
+  downloadAndInstallUpdate: (downloadUrl: string) => Promise<{ ok: boolean; error?: string }>;
+  onUpdateProgress: (callback: (progress: UpdateDownloadProgress) => void) => () => void;
 };

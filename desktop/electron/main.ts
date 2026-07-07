@@ -18,6 +18,7 @@ import { createMockPythonWorkerClient, createPythonWorkerClient } from "./python
 import type { PythonWorkerClient } from "./python-worker.js";
 import { resolveFeedgrabRuntime } from "./runtime.js";
 import type { FeedgrabRuntimeResolution } from "./runtime.js";
+import { checkForUpdates, downloadAndInstallUpdate } from "./updater.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..", "..");
@@ -460,6 +461,23 @@ function registerIpc(): void {
     return error ? { ok: false, error } : { ok: true };
   });
   ipcMain.handle("feedgrab:fetchRemoteMarkdown", async (_event, url: string) => fetchRemoteMarkdown(url));
+  ipcMain.handle("feedgrab:checkForUpdates", async () => checkForUpdates());
+  ipcMain.handle("feedgrab:downloadAndInstallUpdate", async (event, downloadUrl: string) => {
+    if (typeof downloadUrl !== "string" || !downloadUrl) {
+      return { ok: false, error: "无效的下载地址" };
+    }
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const result = await downloadAndInstallUpdate(downloadUrl, (progress) => {
+      win?.webContents.send("feedgrab:updateProgress", progress);
+    });
+    if (result.ok) {
+      setTimeout(() => {
+        isQuitting = true;
+        app.quit();
+      }, 500);
+    }
+    return result;
+  });
 }
 
 async function fetchRemoteMarkdown(url: string): Promise<{ ok: boolean; markdown?: string; error?: string }> {
