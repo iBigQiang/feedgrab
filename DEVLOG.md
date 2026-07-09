@@ -24,6 +24,13 @@
   - 本地模式（`X_DOWNLOAD_MEDIA=true`）：`attachments/10dc747be1dd/` 落地 5/5 文件（主推文 mp4 1633466 bytes + 引用推文 mp4 2249238 bytes，均 file 校验 ISO MP4），主推文与引用推文媒体全部引用本地相对路径，md 中无 twimg 残留。
 - `desktop`: `npm test` 83 passed；`npm run lint`、`npm run build` 通过。
 
+### 桌面端 0.1.18 发布
+
+- `desktop/package.json` 版本递增到 `0.1.18`，`npm run pack:user` 生成 `feedgrab-desktop-setup-0.1.18.exe`。
+- 安装包大小：`376926034` bytes；SHA256：`DF53CFBF360DF4F0E515EADE15F15C8B7A517D960692D6A0F727EB909EDF4A49`；未签名；打包时间 2026-07-10 02:53 +08:00。
+- GitHub Release：`desktop-v0.1.18-20260710`（target `feedgrab-desktop`），asset 已上传，`browser_download_url` 经 `curl -I -L` 核验 `200 OK`。
+- 同步更新 `desktop/README.md` → 覆盖根 `README.md`（Compare-Object 一致）、`README_en.md` 下载入口、`docs/feedgrab-desktop-packaging.md` 发布信息表。
+
 ### 状态：已完成 ✅
 
 ---
