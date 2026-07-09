@@ -109,3 +109,113 @@ def test_front_matter_title_stays_single_line_when_source_title_has_newlines():
         line.startswith("第二行")
         for line in front_matter.splitlines()
     )
+
+def test_tweet_video_rendered_as_html5_player():
+    data = {
+        "text": "这种儿童绘本风的动画真的太治愈了",
+        "author": "@liyue_ai",
+        "author_name": "李岳",
+        "url": "https://x.com/liyue_ai/status/2075136397326139804",
+        "title": "这种儿童绘本风的动画真的太治愈了",
+        "platform": "twitter",
+        "thread_tweets": [
+            {
+                "id": "2075136397326139804",
+                "text": "这种儿童绘本风的动画真的太治愈了",
+                "author": "liyue_ai",
+                "author_name": "李岳",
+                "images": [],
+                "videos": [
+                    "https://video.twimg.com/amplify_video/1/vid/avc1/1280x720/a.mp4?tag=28&mux=1"
+                ],
+                "quoted_tweet": {
+                    "id": "2074110263054286848",
+                    "text": "引用推文",
+                    "author": "someone",
+                    "author_name": "某人",
+                    "url": "https://x.com/someone/status/2074110263054286848",
+                    "images": [],
+                    "videos": ["https://video.twimg.com/amplify_video/2/vid/b.mp4?tag=28"],
+                },
+            },
+        ],
+        "article_data": {},
+    }
+
+    content = from_twitter(data)
+
+    # 主推文视频：<video> 标签 + & 转义为 &amp;
+    assert (
+        '<video controls src="https://video.twimg.com/amplify_video/1/vid/avc1/1280x720/a.mp4?tag=28&amp;mux=1"></video>'
+        in content.content
+    )
+    # 引用推文视频：blockquote 内同样用 <video> 标签
+    assert '> <video controls src="https://video.twimg.com/amplify_video/2/vid/b.mp4?tag=28"></video>' in content.content
+    # 旧的纯链接写法不再出现
+    assert "[▶ video]" not in content.content
+
+
+def test_replace_urls_in_md_matches_html_escaped_video_src(tmp_path):
+    from feedgrab.utils.media import _replace_urls_in_md
+
+    remote = "https://video.twimg.com/amplify_video/1/vid/a.mp4?tag=28&mux=1"
+    escaped = remote.replace("&", "&amp;")
+    md = tmp_path / "t.md"
+    md.write_text(
+        f'<video controls src="{escaped}"></video>\n\n![image](https://pbs.twimg.com/media/x.jpg)\n',
+        encoding="utf-8",
+    )
+
+    _replace_urls_in_md(md, {
+        remote: "attachments/1/a.mp4",
+        "https://pbs.twimg.com/media/x.jpg": "attachments/1/x.jpg",
+    })
+
+    text = md.read_text(encoding="utf-8")
+    assert '<video controls src="attachments/1/a.mp4"></video>' in text
+    assert "![image](attachments/1/x.jpg)" in text
+    assert "twimg.com" not in text
+
+def test_quoted_tweet_media_included_in_download_list():
+    data = {
+        "text": "主推文",
+        "author": "@a",
+        "author_name": "A",
+        "url": "https://x.com/a/status/1",
+        "title": "主推文",
+        "platform": "twitter",
+        "images": ["https://pbs.twimg.com/media/main.jpg"],
+        "videos": ["https://video.twimg.com/main.mp4?tag=28"],
+        "thread_tweets": [
+            {
+                "id": "1",
+                "text": "主推文",
+                "author": "a",
+                "author_name": "A",
+                "images": ["https://pbs.twimg.com/media/main.jpg"],
+                "videos": ["https://video.twimg.com/main.mp4?tag=28"],
+                "quoted_tweet": {
+                    "id": "2",
+                    "text": "被引用推文",
+                    "author": "b",
+                    "author_name": "B",
+                    "url": "https://x.com/b/status/2",
+                    "images": ["https://pbs.twimg.com/amplify_video_thumb/2/img/qt.jpg"],
+                    "videos": ["https://video.twimg.com/amplify_video/2/vid/qt.mp4?tag=28"],
+                },
+            },
+        ],
+        "article_data": {},
+    }
+
+    content = from_twitter(data)
+
+    # 引用推文媒体并入 extra 下载清单（去重、保序）
+    assert content.extra["images"] == [
+        "https://pbs.twimg.com/media/main.jpg",
+        "https://pbs.twimg.com/amplify_video_thumb/2/img/qt.jpg",
+    ]
+    assert content.extra["videos"] == [
+        "https://video.twimg.com/main.mp4?tag=28",
+        "https://video.twimg.com/amplify_video/2/vid/qt.mp4?tag=28",
+    ]

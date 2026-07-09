@@ -149,6 +149,7 @@ PLATFORM_SETTINGS_SCHEMA = PlatformSettingsSchema(
                 PlatformSettingField("X_REQUEST_DELAY", "number", "GraphQL 请求间隔秒数", "x", 1.5),
                 PlatformSettingField("X_FETCH_AUTHOR_REPLIES", "boolean", "抓取作者回帖", "x", False),
                 PlatformSettingField("X_FETCH_ALL_COMMENTS", "boolean", "抓取全部评论", "x", False),
+                PlatformSettingField("X_DOWNLOAD_MEDIA","boolean","[单篇 / 批量]媒体下载到本地","x",False),
                 PlatformSettingField("X_BOOKMARKS_ENABLED", "boolean", "启用书签批量抓取", "x", False),
                 PlatformSettingField("X_BOOKMARK_MAX_PAGES", "integer", "书签最大分页数", "x", 50),
                 PlatformSettingField("X_USER_TWEETS_ENABLED", "boolean", "启用账号推文批量抓取", "x", False),

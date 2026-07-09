@@ -2,6 +2,32 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-07-10 · v0.26.5-dev · X 推文视频 Obsidian 内嵌播放 + 桌面端"推文媒体下载到本地"开关
+
+### 背景
+
+用户抓取推文后 md 中视频只是 `[▶ video](https://video.twimg.com/....mp4?tag=28)` 纯链接，Obsidian 无法内嵌预览播放，点击只能跳浏览器。同时后端已有的 `X_DOWNLOAD_MEDIA` 媒体本地化能力未暴露到桌面端设置界面。
+
+### 实施
+
+- `schema.py`：新增 `_video_embed()` helper，`_render_twitter_tweet_part()` 与 `_render_quoted_tweet()` 的视频渲染由 `[▶ video](url)` 改为 `<video controls src="{html.escape(url)}"></video>`（复用飞书已验证的 Obsidian 内嵌写法；URL 必须转义，Obsidian 会误解析含未转义 `&` 的 src）。
+- `utils/media.py`：`_replace_urls_in_md()` 对每个远程 URL 同时匹配原始形式与 `html.escape` 转义形式，保证下载后 `<video src>` 内的转义 URL 也能替换为本地相对路径。
+- `service/platform_settings.py`：X 平台新增 boolean 字段 `X_DOWNLOAD_MEDIA`（label"推文媒体下载到本地"，默认 false），自动落入桌面端"单篇/线程采集"分组；`desktop/renderer/src/App.tsx` 离线 fallback schema 同步。
+- `.env.example` 注释补充桌面端可视化配置入口。
+- **修复（用户实测反馈）**：勾选下载时引用推文（quoted tweet）媒体仍是在线链接。根因：7 个下载调用点统一读 `content.extra["images"/"videos"]`，而该清单聚合时只拍平线程推文自身媒体。修复于 `schema.from_twitter()` 单点：把 `thread_tweets[*].quoted_tweet` 的媒体并入 extra 清单（去重保序），单篇与全部批量模式一次覆盖。
+
+### 验证结果
+
+- `python -m pytest tests --basetemp=.tmp/pytest-tmp`：361 passed（新增 3 用例：video 标签渲染 + 转义 URL 替换 + 引用推文媒体下载清单）。
+- 真实 URL 实测 `https://x.com/liyue_ai/status/2075136397326139804`：
+  - 在线模式（默认）：md 中 `<video controls src="https://video.twimg.com/...mp4?tag=28"></video>`，主推文与引用推文均为内嵌播放器。
+  - 本地模式（`X_DOWNLOAD_MEDIA=true`）：`attachments/10dc747be1dd/` 落地 5/5 文件（主推文 mp4 1633466 bytes + 引用推文 mp4 2249238 bytes，均 file 校验 ISO MP4），主推文与引用推文媒体全部引用本地相对路径，md 中无 twimg 残留。
+- `desktop`: `npm test` 83 passed；`npm run lint`、`npm run build` 通过。
+
+### 状态：已完成 ✅
+
+---
+
 ## 2026-07-07 · v0.26.5-dev · 桌面端 0.1.17 版本更新通知功能发布
 
 ### 背景

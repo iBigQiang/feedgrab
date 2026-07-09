@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List
 from enum import Enum
 import hashlib
+import html
 import json
 import re
 
@@ -192,6 +193,14 @@ def from_bilibili(video: dict) -> UnifiedContent:
     )
 
 
+def _video_embed(video_url: str) -> str:
+    """Render a video URL as an inline HTML5 player (Obsidian-compatible).
+
+    URL 必须 html.escape：Obsidian 会误解析含未转义 `&`/`,` 的 <video src>。
+    """
+    return f'<video controls src="{html.escape(video_url, quote=True)}"></video>'
+
+
 def _render_quoted_tweet(qt: dict) -> str:
     """Render a quoted tweet as a Markdown blockquote with full content."""
     if not qt or not qt.get("text"):
@@ -218,7 +227,7 @@ def _render_quoted_tweet(qt: dict) -> str:
     # Videos
     for vid in qt.get("videos", []):
         if vid:
-            lines.append(f">\n> [▶ video]({vid})")
+            lines.append(f">\n> {_video_embed(vid)}")
     return "\n".join(lines)
 
 
@@ -233,7 +242,7 @@ def _render_twitter_tweet_part(t: dict, prefix: str = "") -> str:
     # Inline videos
     for video_url in t.get("videos", []):
         if video_url:
-            part += f"\n\n[▶ video]({video_url})"
+            part += f"\n\n{_video_embed(video_url)}"
     # Quoted tweet — full blockquote with media
     qt_block = _render_quoted_tweet(t.get("quoted_tweet"))
     if qt_block:
@@ -312,6 +321,17 @@ def from_twitter(data: dict) -> UnifiedContent:
 
     title = _clean_twitter_title(data.get("title") or data.get("text", ""))
 
+    # 引用推文的媒体也计入下载清单（extra images/videos 是所有
+    # X_DOWNLOAD_MEDIA 调用点的唯一媒体来源），与主线程媒体行为一致
+    all_images = list(data.get("images", []))
+    all_videos = list(data.get("videos", []))
+    for t in tweets:
+        qt = t.get("quoted_tweet") or {}
+        all_images.extend(u for u in qt.get("images", []) if u)
+        all_videos.extend(u for u in qt.get("videos", []) if u)
+    all_images = list(dict.fromkeys(all_images))
+    all_videos = list(dict.fromkeys(all_videos))
+
     return UnifiedContent(
         source_type=SourceType.TWITTER,
         source_name=data.get("author", ""),
@@ -331,8 +351,8 @@ def from_twitter(data: dict) -> UnifiedContent:
             "replies": data.get("replies", 0),
             "bookmarks": data.get("bookmarks", 0),
             "views": data.get("views", "0"),
-            "images": data.get("images", []),
-            "videos": data.get("videos", []),
+            "images": all_images,
+            "videos": all_videos,
             "quoted_tweets": data.get("quoted_tweets", []),
             "author_replies": data.get("author_replies", []),
             "comments": data.get("comments", []),

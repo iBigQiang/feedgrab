@@ -12,6 +12,7 @@ Configuration:
     XHS_DOWNLOAD_MEDIA=true     (default false)
 """
 
+import html
 import re
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
@@ -359,9 +360,12 @@ def _replace_urls_in_md(md_path: Path, url_map: dict) -> None:
     changed = False
 
     for remote_url, local_path in url_map.items():
-        if remote_url in content:
-            content = content.replace(remote_url, local_path)
-            changed = True
+        # 视频 URL 在 <video src> 中经过 html.escape，需同时匹配转义形式
+        candidates = {remote_url, html.escape(remote_url, quote=True)}
+        for candidate in candidates:
+            if candidate in content:
+                content = content.replace(candidate, local_path)
+                changed = True
 
     if changed:
         md_path.write_text(content, encoding="utf-8")

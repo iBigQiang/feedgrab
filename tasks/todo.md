@@ -58,3 +58,24 @@
 - 网络抓取链路的"完成"必须以真实 URL 端到端实测为准，单测只能锁行为不能证明链路可用
 - 声称"优先使用 DOM 真实播放 URL"前要先验证该 URL 返回的是什么——播放器流 URL 通常是转码预览，不是原件
 - 下载类功能日志必须可见（loguru），否则用户无法区分"没触发"和"触发了但失败"
+
+---
+
+# X 视频 Obsidian 内嵌播放 + 桌面端媒体下载开关 · 2026-07-10
+
+- [x] schema.py 视频渲染改 `<video controls src>`（含引用推文，URL html.escape）
+- [x] media.py `_replace_urls_in_md` 兼容转义 URL 形式
+- [x] platform_settings.py + App.tsx fallback 暴露 `X_DOWNLOAD_MEDIA`（"推文媒体下载到本地"，单篇/线程采集分组）
+- [x] pytest 360 passed（+2 新用例）；desktop test 83 passed / lint / build 通过
+- [x] 真实推文双模式实测：在线 `<video src=在线mp4>` / 本地 attachments 3/3 落地、mp4 结构校验通过
+- [x] DEVLOG + .env.example 更新
+
+## 复盘
+
+改动极小（4 文件 + 测试）：视频内嵌复用飞书已验证写法；下载开关后端链路早已完整，仅补一个 schema 字段即自动贯通 UI→IPC→os.environ→config。唯一坑点是 `<video src>` 内 URL 经 html.escape 后与下载替换逻辑的原始 URL 不一致，已在 media.py 兼容。引用推文媒体仍在线引用（原有下载清单范围），如需扩展另立迭代。
+
+## 追加修复（用户实测反馈）· 引用推文媒体未本地化
+
+- [x] 根因：extra["images"/"videos"] 聚合只含线程推文自身媒体，quoted_tweet 媒体从未入下载清单
+- [x] 修复：schema.from_twitter 单点并入 quoted 媒体（去重保序），覆盖单篇 + 7 个批量调用点
+- [x] pytest 361 passed（+1 用例）；实测 attachments 5/5 落地，引用 mp4 2.2MB ISO MP4 校验通过，md 无在线残留

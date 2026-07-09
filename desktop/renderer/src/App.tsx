@@ -2097,6 +2097,7 @@ function settingsSchemaFromSnapshot(settings: SettingsSnapshot | undefined): Set
           { name: "X_REQUEST_DELAY", label: "GraphQL 请求间隔秒数", type: "number", value: 1.5 },
           { name: "X_FETCH_AUTHOR_REPLIES", label: "抓取作者回帖", type: "boolean", value: false },
           { name: "X_FETCH_ALL_COMMENTS", label: "抓取全部评论", type: "boolean", value: false },
+          { name: "X_DOWNLOAD_MEDIA", label: "推文媒体下载到本地", type: "boolean", value: false },
           { name: "X_BOOKMARKS_ENABLED", label: "启用书签批量抓取", type: "boolean", value: false },
           { name: "X_BOOKMARK_MAX_PAGES", label: "书签最大分页数", type: "number", value: 50 },
           { name: "X_USER_TWEETS_ENABLED", label: "启用账号推文批量抓取", type: "boolean", value: false },
