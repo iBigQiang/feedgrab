@@ -205,10 +205,28 @@ button:disabled {
 .update-bubble-error {
   background: #8b2c2c;
   color: #ffebee;
+  /* 报错信息可能含安装包路径，允许换行避免溢出侧边栏 */
+  white-space: normal;
+  width: max-content;
+  max-width: 220px;
+  word-break: break-all;
 }
 
 .update-bubble-error::after {
   border-top-color: #8b2c2c;
+}
+
+.update-bubble-progress {
+  background: #1f4e79;
+  color: #e3f2fd;
+  /* 安装提示文案较长，允许换行 */
+  white-space: normal;
+  width: max-content;
+  max-width: 220px;
+}
+
+.update-bubble-progress::after {
+  border-top-color: #1f4e79;
 }
 
 @keyframes update-bubble-fade-in {

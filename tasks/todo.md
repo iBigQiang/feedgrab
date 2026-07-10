@@ -79,3 +79,16 @@
 - [x] 根因：extra["images"/"videos"] 聚合只含线程推文自身媒体，quoted_tweet 媒体从未入下载清单
 - [x] 修复：schema.from_twitter 单点并入 quoted 媒体（去重保序），覆盖单篇 + 7 个批量调用点
 - [x] pytest 361 passed（+1 用例）；实测 attachments 5/5 落地，引用 mp4 2.2MB ISO MP4 校验通过，md 无在线残留
+
+---
+
+# 桌面端自动更新 spawn EFTYPE 修复 · 2026-07-10
+
+- [x] 根因：updater.ts downloadFile 的 data 回调从未 fileStream.write(chunk)，安装包落盘 0 字节 → spawn 空 exe 报 EFTYPE
+- [x] 修复：补写盘 + content-length 大小校验 + spawnInstaller Promise 化（监听 error/spawn 事件）+ 报错附安装包路径
+- [x] UI：下载进度 / 更新报错统一改左下角版本号上方气泡（进度持续显示，报错停留 8s 可换行）
+- [x] 验证：desktop test 83 passed / lint / build 通过；electron 真实 URL 实测 2375312 bytes 完整落盘 + zip 结构校验
+- [ ] 随下一次桌面端打包（0.1.19）发布后用户实测自动更新闭环
+- [x] 端到端实测（0.1.17→0.1.18）：更新按钮 → 弹窗 → 气泡进度 → 376926034 bytes 完整落盘 → 安装器启动成功 → 注册表 DisplayVersion 0.1.18
+- [x] 追加：spawn 参数补 --force-run，静默安装完成后自动重启新版应用（实测 D:\feedgrab Desktop 自动拉起）；安装中气泡文案说明静默安装行为
+- [x] 实测遗留清理：package.json 版本还原 0.1.18、临时脚本/日志/TEMP 安装包已删

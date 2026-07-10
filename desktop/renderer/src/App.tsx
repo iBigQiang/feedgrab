@@ -310,7 +310,8 @@ export function App(): ReactElement {
     if (!updateBubble) {
       return undefined;
     }
-    const timer = window.setTimeout(() => setUpdateBubble(undefined), 3000);
+    // 报错气泡（可能包含安装包路径）停留更久，便于用户看清
+    const timer = window.setTimeout(() => setUpdateBubble(undefined), updateBubble.tone === "error" ? 8000 : 3000);
     return () => window.clearTimeout(timer);
   }, [updateBubble]);
 
@@ -551,7 +552,7 @@ export function App(): ReactElement {
 
   function handleDownloadAndInstall(): void {
     if (!updateInfo?.downloadUrl) {
-      showToast("下载地址无效", "error");
+      setUpdateBubble({ message: "下载地址无效", tone: "error" });
       return;
     }
     if (updateInfo.isPortable) {
@@ -566,12 +567,15 @@ export function App(): ReactElement {
       .then((result) => {
         if (!result.ok) {
           setUpdateState("idle");
-          showToast(result.error ?? "下载安装失败", "error");
+          setUpdateBubble({ message: result.error ?? "下载安装失败", tone: "error" });
         }
       })
       .catch((error: unknown) => {
         setUpdateState("idle");
-        showToast(error instanceof Error ? `更新失败：${error.message}` : "更新失败", "error");
+        setUpdateBubble({
+          message: error instanceof Error ? `更新失败：${error.message}` : "更新失败",
+          tone: "error"
+        });
       });
   }
 
@@ -643,14 +647,18 @@ export function App(): ReactElement {
         <div className="sidebar-footer">
           {desktopVersion ? (
             <div className="sidebar-version">
-              {updateBubble ? (
+              {updateState === "downloading" ? (
+                <div className="update-bubble update-bubble-progress">下载新版安装包 {downloadPercent}%</div>
+              ) : updateState === "installing" ? (
+                <div className="update-bubble update-bubble-progress">下载完成，应用即将退出并后台静默安装，装好后自动启动新版</div>
+              ) : updateBubble ? (
                 <div className={`update-bubble update-bubble-${updateBubble.tone}`}>{updateBubble.message}</div>
               ) : null}
               <span className="version-text">版本：v{desktopVersion}</span>
               {updateState === "checking" ? (
                 <button type="button" className="update-btn" disabled>检查中...</button>
               ) : updateState === "downloading" ? (
-                <button type="button" className="update-btn" disabled>下载中 {downloadPercent}%</button>
+                <button type="button" className="update-btn" disabled>下载中</button>
               ) : updateState === "installing" ? (
                 <button type="button" className="update-btn" disabled>安装中...</button>
               ) : updateInfo?.hasUpdate ? (

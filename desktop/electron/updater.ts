@@ -1,6 +1,6 @@
 import { app, net } from "electron";
 import { spawn } from "node:child_process";
-import { createWriteStream, existsSync, mkdirSync, renameSync, unlinkSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { UpdateCheckResult, UpdateDownloadProgress } from "./ipc-types.js";
@@ -158,7 +158,7 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
   }
 }
 
-function downloadFile(
+export function downloadFile(
   url: string,
   destPath: string,
   onProgress: (progress: UpdateDownloadProgress) => void
@@ -185,6 +185,7 @@ function downloadFile(
 
       response.on("data", (chunk: Buffer) => {
         downloadedBytes += chunk.length;
+        fileStream.write(chunk);
         const percent = totalBytes > 0 ? Math.floor((downloadedBytes / totalBytes) * 100) : 0;
         onProgress({ percent, downloadedBytes, totalBytes });
       });
@@ -192,6 +193,10 @@ function downloadFile(
       response.on("end", () => {
         fileStream.end(() => {
           clearTimeout(timer);
+          if (totalBytes > 0 && downloadedBytes !== totalBytes) {
+            reject(new Error(`下载不完整：已下载 ${downloadedBytes} / ${totalBytes} bytes`));
+            return;
+          }
           resolve();
         });
       });
@@ -215,18 +220,79 @@ function downloadFile(
   });
 }
 
+function legacyUpdateDownloadDir(): string {
+  return path.join(tmpdir(), "feedgrab-desktop-update");
+}
+
+export function getUpdateDownloadDir(): string {
+  // 打包运行时安装包下载到客户端安装目录下的 update 子目录，便于用户定位
+  if (app.isPackaged) {
+    const dir = path.join(path.dirname(process.execPath), "update");
+    try {
+      mkdirSync(dir, { recursive: true });
+      return dir;
+    } catch {
+      // 安装目录不可写时回退到系统临时目录
+    }
+  }
+  const fallback = legacyUpdateDownloadDir();
+  mkdirSync(fallback, { recursive: true });
+  return fallback;
+}
+
+export function cleanupUpdateDownloads(): void {
+  // 应用启动时清理上次更新遗留的安装包：安装成功后新版本首次启动即删除；
+  // 安装失败/取消的残留也一并清掉，下次更新会重新下载
+  const dirs = new Set([legacyUpdateDownloadDir()]);
+  if (app.isPackaged) {
+    dirs.add(path.join(path.dirname(process.execPath), "update"));
+  }
+  for (const dir of dirs) {
+    if (!existsSync(dir)) continue;
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const name of entries) {
+      if (!/\.(exe|part)$/i.test(name)) continue;
+      try { unlinkSync(path.join(dir, name)); } catch { /* 可能仍被安装器占用，留待下次清理 */ }
+    }
+  }
+}
+
+function spawnInstaller(installerPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawn(installerPath, ["/S", "--force-run"], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true
+      });
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
+    // Windows 下 spawn 的失败（如 EFTYPE）通过异步 error 事件抛出，try/catch 捕获不到
+    child.once("error", (error) => reject(error));
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+  });
+}
+
 export async function downloadAndInstallUpdate(
   downloadUrl: string,
   onProgress: (progress: UpdateDownloadProgress) => void
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; installerPath?: string }> {
   if (!downloadUrl) {
     return { ok: false, error: "无效的下载地址" };
   }
 
-  const tempDir = path.join(tmpdir(), "feedgrab-desktop-update");
-  if (!existsSync(tempDir)) {
-    mkdirSync(tempDir, { recursive: true });
-  }
+  const tempDir = getUpdateDownloadDir();
 
   const fileName = path.basename(new URL(downloadUrl).pathname) || "feedgrab-desktop-setup.exe";
   const downloadPath = path.join(tempDir, fileName);
@@ -247,21 +313,20 @@ export async function downloadAndInstallUpdate(
     }
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "下载失败"
+      error: error instanceof Error ? error.message : "下载失败",
+      installerPath: downloadPath
     };
   }
 
   try {
-    spawn(downloadPath, ["/S"], {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true
-    }).unref();
-    return { ok: true };
+    await spawnInstaller(downloadPath);
+    return { ok: true, installerPath: downloadPath };
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     return {
       ok: false,
-      error: error instanceof Error ? `启动安装器失败：${error.message}` : "启动安装器失败"
+      error: `启动安装器失败：${message}（安装包已保存到 ${downloadPath}，可手动运行安装）`,
+      installerPath: downloadPath
     };
   }
 }

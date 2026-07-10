@@ -292,6 +292,6 @@ export type FeedgrabIpcApi = {
   fetchRemoteMarkdown: (url: string) => Promise<RemoteMarkdownResult>;
   onWorkerEvent: (callback: (event: FeedgrabWorkerEvent) => void) => () => void;
   checkForUpdates: () => Promise<UpdateCheckResult>;
-  downloadAndInstallUpdate: (downloadUrl: string) => Promise<{ ok: boolean; error?: string }>;
+  downloadAndInstallUpdate: (downloadUrl: string) => Promise<{ ok: boolean; error?: string; installerPath?: string }>;
   onUpdateProgress: (callback: (progress: UpdateDownloadProgress) => void) => () => void;
 };

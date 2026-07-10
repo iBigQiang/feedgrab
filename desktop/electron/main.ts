@@ -18,7 +18,7 @@ import { createMockPythonWorkerClient, createPythonWorkerClient } from "./python
 import type { PythonWorkerClient } from "./python-worker.js";
 import { resolveFeedgrabRuntime } from "./runtime.js";
 import type { FeedgrabRuntimeResolution } from "./runtime.js";
-import { checkForUpdates, downloadAndInstallUpdate } from "./updater.js";
+import { checkForUpdates, cleanupUpdateDownloads, downloadAndInstallUpdate } from "./updater.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..", "..");
@@ -836,6 +836,7 @@ registerIpc();
 
 void app.whenReady().then(async () => {
   smokeLog("app ready");
+  cleanupUpdateDownloads();
   if (process.platform !== "darwin") {
     Menu.setApplicationMenu(null);
   }

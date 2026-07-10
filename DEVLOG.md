@@ -2,6 +2,34 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-07-10 · 桌面端自动更新修复：安装包 0 字节导致 spawn EFTYPE + 进度/报错改左下角气泡
+
+### 背景
+
+用户实测 v0.1.17 → v0.1.18 自动更新：下载完成后右上角 Toast 报"启动安装器失败：spawn EFTYPE"，安装器从未启动；下载进度显示在"更新"按钮上遮盖按钮，报错位置也与更新交互区（左下角版本号）割裂。
+
+### 根因
+
+`desktop/electron/updater.ts → downloadFile()` 的 `response.on("data")` 只累计进度**从未把 chunk 写入 fileStream**，下载产物是 0 字节空文件；rename 后 spawn 一个空 `.exe`，libuv 判定非有效可执行格式返回 `EFTYPE`。下载目录为 `%TEMP%\feedgrab-desktop-update\`。次要问题：Windows 下 spawn 失败经异步 `error` 事件抛出，原 try/catch 捕获不到（本次是 IPC 层兜底才显示出来）。
+
+### 实施
+
+- `updater.ts`：data 回调补 `fileStream.write(chunk)`；下载完成后校验 `downloadedBytes === totalBytes`（content-length 存在时），不完整则报错不安装；spawn 改为 `spawnInstaller()` Promise 化，监听 `spawn`/`error` 事件；失败信息附带安装包完整路径提示可手动安装；结果新增 `installerPath` 字段（`ipc-types.ts` 同步）。
+- `App.tsx`：下载/安装进度与全部更新报错从右上角 Toast 改为版本号上方气泡（`update-bubble-progress` 持续显示进度百分比，报错气泡停留 8s）。
+- `styles.css`：新增 progress 气泡样式；error 气泡允许换行 + max-width（报错含路径较长）。
+- **追加（用户要求）下载目录改客户端安装目录**：新增 `getUpdateDownloadDir()`——打包运行时下载到 `<安装目录>\update\`（如 `D:\feedgrab Desktop\update\`），目录不可写时回退 `%TEMP%\feedgrab-desktop-update\`（开发模式同此）；新增 `cleanupUpdateDownloads()` 在 `app.whenReady` 时清理两处目录遗留的 `.exe`/`.part`（安装成功后新版本首次启动即自动删除安装包，失败残留下次启动清理）。
+
+### 验证结果
+
+- `npm test` 83 passed；`npm run lint`、`npm run build` 通过。
+- 真实 URL 实测（electron 环境直调 `downloadFile`）：GitHub 2375312 bytes 归档完整落盘 `%TEMP%\feedgrab-desktop-update\`，zipfile 结构校验通过（修复前同链路产物为 0 字节）。
+- **端到端实测（0.1.17→0.1.18 全链路）**：临时降 `package.json` 版本至 0.1.17 → 开发版点击"更新"→"立即更新" → 气泡进度正常显示 → 安装包 376926034 bytes 完整落盘（与 release 逐字节一致）→ 安装器成功启动（EFTYPE 消失）→ 静默安装完成，注册表 DisplayVersion 0.1.17→0.1.18。
+- **追加修复：静默安装后自动重启应用**——实测发现 `/S` 静默装完后应用不会自动启动（用户视角"应用关了没动静"）。spawn 参数补 `--force-run`（electron-builder assisted installer NSIS 模板原生支持：`${isForceRun} && ${Silent}` 时执行 StartApp）；实测直跑 `setup-0.1.18.exe /S --force-run`：安装完成后 `D:\feedgrab Desktop\feedgrab Desktop.exe` + `feedgrab-worker` 自动拉起。"安装中"气泡文案同步改为"下载完成，应用即将退出并后台静默安装，装好后自动启动新版"。
+
+### 状态：已完成 ✅（待随下一次桌面端打包发布生效）
+
+---
+
 ## 2026-07-10 · v0.26.5-dev · X 推文视频 Obsidian 内嵌播放 + 桌面端"推文媒体下载到本地"开关
 
 ### 背景
