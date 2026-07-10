@@ -26,7 +26,15 @@
 - **端到端实测（0.1.17→0.1.18 全链路）**：临时降 `package.json` 版本至 0.1.17 → 开发版点击"更新"→"立即更新" → 气泡进度正常显示 → 安装包 376926034 bytes 完整落盘（与 release 逐字节一致）→ 安装器成功启动（EFTYPE 消失）→ 静默安装完成，注册表 DisplayVersion 0.1.17→0.1.18。
 - **追加修复：静默安装后自动重启应用**——实测发现 `/S` 静默装完后应用不会自动启动（用户视角"应用关了没动静"）。spawn 参数补 `--force-run`（electron-builder assisted installer NSIS 模板原生支持：`${isForceRun} && ${Silent}` 时执行 StartApp）；实测直跑 `setup-0.1.18.exe /S --force-run`：安装完成后 `D:\feedgrab Desktop\feedgrab Desktop.exe` + `feedgrab-worker` 自动拉起。"安装中"气泡文案同步改为"下载完成，应用即将退出并后台静默安装，装好后自动启动新版"。
 
-### 状态：已完成 ✅（待随下一次桌面端打包发布生效）
+### 桌面端 0.1.19 发布
+
+- `desktop/package.json` 版本递增到 `0.1.19`，`npm run pack:user` 完整三步打包生成 `feedgrab-desktop-setup-0.1.19.exe`。
+- 安装包大小：`376927297` bytes；SHA256：`44086358BAB9D8D8A1063DCD2D9D3EC4125C094B52E15613846A8E4B90448D23`；未签名；打包时间 2026-07-10 20:24 +08:00。
+- GitHub Release：`desktop-v0.1.19-20260710`（target `feedgrab-desktop`），asset 已上传，`browser_download_url` 经 `curl -I -L` 核验 `200 OK`。
+- 同步更新 `desktop/README.md` → 覆盖根 `README.md`（Compare-Object 一致）、`README_en.md` 下载入口、`docs/feedgrab-desktop-packaging.md` 发布信息表。
+- 注意：0.1.18 及更早版本内置旧更新逻辑，升级到 0.1.19 仍需手动安装；从 0.1.19 起客户端内自动更新完全可用。
+
+### 状态：已完成 ✅
 
 ---
 
