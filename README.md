@@ -353,6 +353,8 @@ feedgrab 对 X/Twitter 内容采用先进的六级兜底策略：
 
 > **Syndication API 的价值**：有 Cookie 时 GraphQL 自动切换，正常使用基本不会降级到 Syndication。Syndication 的价值在于：当 Cookie 全部过期/失效时，用户不需要立刻重新登录，仍能拿到 80% 的数据（缺 retweets/bookmarks/views 三项），而不是降级到只有纯文本的 oEmbed。
 
+> **X Article 直链**：当帖子内容为 `https://x.com/i/article/<article_id>`（或 `twitter.com` 旧域名）时，feedgrab 会自动重新抓取该地址的长文章正文。书签、用户推文、列表和搜索批量同样生效。
+
 Tier 0（GraphQL）移植自 [baoyu-danger-x-to-markdown](https://github.com/JimLiu/baoyu-skills/tree/main/skills/baoyu-danger-x-to-markdown) 技能，特性包括：
 - 动态 `queryId` 解析（从 X 前端 JS bundle 中提取）
 - 完整线程重建（作者自回复链）

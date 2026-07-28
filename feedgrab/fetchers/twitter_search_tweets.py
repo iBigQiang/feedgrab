@@ -503,7 +503,11 @@ async def fetch_search_supplementary(
                             else:
                                 logger.info(f"[Search] 长文章，Jina 获取正文: @{author}")
                                 jina_content = _fetch_article_body(
-                                    tweet_url, article, author, "[Search]"
+                                    tweet_url,
+                                    article,
+                                    author,
+                                    "[Search]",
+                                    source_text=tweet_data.get("text", ""),
                                 )
                                 if jina_content:
                                     data["text"] = jina_content

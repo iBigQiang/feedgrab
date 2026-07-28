@@ -149,19 +149,31 @@ def _fetch_article_body(
     article_data: dict,
     author: str,
     log_prefix: str = "[Twitter]",
+    source_text: str = "",
 ) -> str:
-    """Fetch article body via Jina, trying article URL first.
+    """Fetch article body via Jina, trying the canonical Article URL first.
 
     Returns cleaned article content, or empty string if all attempts fail.
     """
     from feedgrab.fetchers.jina import fetch_via_jina
 
-    # Build URL candidates: article URL first, then status URL
-    # Twitter article URL = tweet URL with /status/ replaced by /article/
+    # X Article URLs use /i/article/{article_id}; /status/ → /article/
+    # is not a valid equivalent. Prefer an explicit URL from the tweet text,
+    # then use the GraphQL article rest_id when it is available.
     urls_to_try = []
-    if "/status/" in tweet_url:
-        urls_to_try.append(tweet_url.replace("/status/", "/article/"))
+    article_url_match = re.search(
+        r"https?://(?:www\.)?(?:x|twitter)\.com/i/article/\d+",
+        source_text,
+    )
+    if article_url_match:
+        urls_to_try.append(article_url_match.group(0))
+
+    article_id = str(article_data.get("id") or article_data.get("rest_id") or "")
+    if article_id.isdigit():
+        urls_to_try.append(f"https://x.com/i/article/{article_id}")
+
     urls_to_try.append(tweet_url)
+    urls_to_try = list(dict.fromkeys(urls_to_try))
 
     for jina_url in urls_to_try:
         for attempt in range(2):
@@ -588,7 +600,11 @@ async def fetch_bookmarks(bookmark_url: str, cookies: dict) -> dict:
                 else:
                     logger.info(f"[Bookmarks] [{idx + 1}/{total}] 长文章，Jina 获取正文: @{author}")
                     jina_content = _fetch_article_body(
-                        tweet_url, article, author, "[Bookmarks]"
+                        tweet_url,
+                        article,
+                        author,
+                        "[Bookmarks]",
+                        source_text=tweet_data.get("text", ""),
                     )
                     if jina_content:
                         data["text"] = jina_content

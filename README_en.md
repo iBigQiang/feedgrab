@@ -323,6 +323,8 @@ feedgrab uses an advanced six-tier strategy for X/Twitter content:
 
 > **Value of the Syndication tier**: When cookies are valid, GraphQL handles everything automatically and Syndication is rarely needed. Its real value is when all cookies expire — users can still get 80% of the data (missing only retweets/bookmarks/views) without immediately re-logging in, instead of degrading to text-only oEmbed.
 
+> **X Article links**: When a post contains `https://x.com/i/article/<article_id>` (or the legacy `twitter.com` domain), feedgrab automatically refetches the long-form Article body. This also applies to bookmarks, user timelines, lists, and search batches.
+
 Tier 0 (GraphQL) is ported from the [baoyu-danger-x-to-markdown](https://github.com/JimLiu/baoyu-skills/tree/main/skills/baoyu-danger-x-to-markdown) skill, featuring:
 - Dynamic `queryId` resolution from X's frontend JS bundles
 - Complete thread reconstruction (author self-reply chains)

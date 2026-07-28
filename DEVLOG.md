@@ -2,6 +2,23 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-07-28 · v0.24.2 · X Article 直链正文抓取修复
+
+### 背景与根因
+
+部分 X 帖子的正文只有 `https://x.com/i/article/<article_id>` 长文直链。旧回退逻辑仅把短 `t.co` 链接识别为 Article 占位内容，并错误地把状态页 `/status/<tweet_id>` 改写为 `/article/<tweet_id>`；该路径不是 X Article 的标准地址，导致最终 Markdown 保留 URL 而没有正文。
+
+### 修复
+
+- 直接识别帖子文本中的 `x.com/i/article/<article_id>` 或 `twitter.com/i/article/<article_id>`。
+- Jina 正文回填优先请求该直链；GraphQL 批量结果未携带直链时，使用 `article.rest_id` 构造同一规范 URL；最后才回退状态页。
+- 单篇、书签、用户推文、列表、搜索补充和 TwitterAPI.io 批量入口均传递原始帖子文本到共用正文抓取函数。
+- 新增回归测试，覆盖显式直链与仅有 GraphQL Article ID 两种情况。
+
+### 验证
+
+`tests/test_twitter_article_url.py` 与现有 Twitter 相关测试共 **51 passed**。
+
 ## 2026-05-21 · v0.24.1 · Twitter 多账号 429 轮换修复
 
 ### 背景

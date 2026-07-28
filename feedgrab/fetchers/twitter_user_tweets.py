@@ -509,7 +509,11 @@ async def fetch_user_tweets(
                         f"长文章，Jina 获取正文: @{author}"
                     )
                     jina_content = _fetch_article_body(
-                        tweet_url, article, author, "[UserTweets]"
+                        tweet_url,
+                        article,
+                        author,
+                        "[UserTweets]",
+                        source_text=tweet_data.get("text", ""),
                     )
                     if jina_content:
                         data["text"] = jina_content

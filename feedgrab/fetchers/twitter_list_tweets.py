@@ -464,7 +464,11 @@ async def fetch_list_tweets(
                         data["thread_tweets"][0]["text"] = article_body
                 else:
                     jina_content = _fetch_article_body(
-                        tweet_url, article_info, author, "[ListTweets]"
+                        tweet_url,
+                        article_info,
+                        author,
+                        "[ListTweets]",
+                        source_text=tweet_data.get("text", ""),
                     )
                     if jina_content:
                         data["text"] = jina_content
