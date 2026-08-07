@@ -18,6 +18,7 @@ from typing import Dict, Any, List, Optional
 from urllib.parse import urlparse
 
 from loguru import logger
+from feedgrab.service.proxy import get_playwright_proxy_options
 
 
 # ---------------------------------------------------------------------------
@@ -240,9 +241,11 @@ async def _launch_browser_for_kdocs(url: str):
     session_path = get_session_dir() / "kdocs.json"
     storage_state = str(session_path) if session_path.exists() else None
 
+    proxy_options = get_playwright_proxy_options()
     browser = await pw.chromium.launch(
         headless=True,
         args=["--disable-blink-features=AutomationControlled"],
+        **({"proxy": proxy_options} if proxy_options else {}),
     )
     context = await browser.new_context(
         user_agent=get_user_agent(),

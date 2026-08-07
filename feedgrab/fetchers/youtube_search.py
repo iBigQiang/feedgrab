@@ -15,6 +15,7 @@ from typing import Dict, Any, List, Optional
 from urllib.parse import quote_plus
 
 from loguru import logger
+from feedgrab.service.proxy import get_ytdlp_proxy_args
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +366,7 @@ def download_video(
     if audio_only:
         cmd = [
             "yt-dlp", *_js_runtime_args(),
+            *get_ytdlp_proxy_args(),
             "-x", "--audio-format", "mp3",
             "-o", output_template, "--no-playlist",
             *cookie_args, url,
@@ -378,6 +380,7 @@ def download_video(
         }
         cmd = [
             "yt-dlp", *_js_runtime_args(),
+            *get_ytdlp_proxy_args(),
             "-f", fmt_map.get(quality, fmt_map["best"]),
             "-o", output_template, "--no-playlist",
             *cookie_args, url,
@@ -432,6 +435,7 @@ def download_subtitles(
     for try_lang in langs_to_try:
         cmd = [
             "yt-dlp", *_js_runtime_args(),
+            *get_ytdlp_proxy_args(),
             "--write-auto-sub", "--write-sub",
             "--sub-lang", try_lang,
             "--sub-format", "srt",

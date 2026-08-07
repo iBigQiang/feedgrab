@@ -350,7 +350,13 @@ class XhsApiClient:
         self._max_retries = max_retries
         self._last_request_time = 0.0
         self._verify_count = 0
-        self._http = httpx.Client(timeout=30.0, follow_redirects=True)
+        from feedgrab.service.proxy import get_proxy_url, is_proxy_enabled
+        proxy_url = get_proxy_url() if is_proxy_enabled() else ""
+        self._http = httpx.Client(
+            timeout=30.0,
+            follow_redirects=True,
+            **({"proxy": proxy_url} if proxy_url else {}),
+        )
         self._signing = _get_signing()
 
     def close(self) -> None:

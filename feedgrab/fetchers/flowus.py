@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from loguru import logger
+from feedgrab.service.proxy import get_playwright_proxy_options
 
 
 # ---------------------------------------------------------------------------
@@ -268,9 +269,11 @@ async def _launch_browser_for_flowus():
     session_path = get_session_dir() / "flowus.json"
     storage_state = str(session_path) if session_path.exists() else None
 
+    proxy_options = get_playwright_proxy_options()
     browser = await pw.chromium.launch(
         headless=True,
         args=["--disable-blink-features=AutomationControlled"],
+        **({"proxy": proxy_options} if proxy_options else {}),
     )
     context = await browser.new_context(
         user_agent=get_user_agent(),
@@ -810,9 +813,11 @@ def _resolve_image_urls_from_dom(doc_url: str, oss_names: List[str]) -> Dict[str
 
     async def _run() -> Dict[str, str]:
         pw = await async_playwright().start()
+        proxy_options = get_playwright_proxy_options()
         browser = await pw.chromium.launch(
             headless=True,
             args=["--disable-blink-features=AutomationControlled"],
+            **({"proxy": proxy_options} if proxy_options else {}),
         )
         ctx = await browser.new_context(
             user_agent=get_user_agent(),

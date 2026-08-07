@@ -16,6 +16,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 from loguru import logger
+from feedgrab.service.proxy import get_playwright_proxy_options
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +311,11 @@ async def _extract_via_playwright(url: str) -> Optional[dict]:
         return None
 
     pw = await async_playwright().start()
-    browser = await pw.chromium.launch(headless=True)
+    proxy_options = get_playwright_proxy_options()
+    browser = await pw.chromium.launch(
+        headless=True,
+        **({"proxy": proxy_options} if proxy_options else {}),
+    )
     try:
         page = await browser.new_page()
         await page.goto(url, wait_until="networkidle", timeout=30000)
