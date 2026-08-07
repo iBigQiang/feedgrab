@@ -297,6 +297,8 @@ feedgrab clean-index                  # 交互确认后清理
 feedgrab clean-index --yes            # 跳过确认直接清理
 ```
 
+Python 调用可使用 `fetch_reddit_structured()` / `fetch_reddit_subreddit_structured()` 获取结构化 Reddit 结果。返回值保留兼容的 `content` Markdown，并额外提供帖子正文 `body`、评论数组 `comments` 和抓取状态 `fetch_status`，便于清洗、分析和二次加工。
+
 > `feedgrab reset` 会扫描目标目录下所有 `.md` 文件的 YAML front matter，提取 `item_id` 并从去重索引中移除，然后删除文件。执行前会显示待删除数量并要求确认。找不到目录时会自动列出所有可用的子目录。
 
 > `feedgrab clean-index` 清理索引目录中除 `item_id_url.json`（全局去重索引）以外的所有文件，包括批量记录（`status_*.json`、`list_*.json` 等）和 API 断点缓存（`.api_discovery_*.jsonl`）。这些文件在采集完成后不再需要，定期清理可释放磁盘空间。

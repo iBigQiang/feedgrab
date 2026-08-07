@@ -273,6 +273,8 @@ feedgrab clean-index                  # Interactive confirmation
 feedgrab clean-index --yes            # Skip confirmation
 ```
 
+Python callers can use `fetch_reddit_structured()` / `fetch_reddit_subreddit_structured()` for structured Reddit results. The return value keeps the backward-compatible rendered Markdown in `content` and also exposes the post `body`, a `comments` array, and `fetch_status` for cleaning, analysis, and downstream processing.
+
 ### Layer 2: Claude Code Skills
 
 Install all skills with one command:
