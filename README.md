@@ -715,7 +715,7 @@ async def main():
 asyncio.run(main())
 ```
 
-CLI 命令仍保持原有行为；MCP 服务器也通过同一 service 层调用抓取能力。批量抓取和 MCP 调用会返回结构化失败项，不再因为单个 URL 失败吞掉整批结果；`FEEDGRAB_PROXY_*` 代理配置也在 service 设置层统一暴露。
+CLI 命令仍保持原有行为；MCP 服务器也通过同一 service 层调用抓取能力。批量抓取和 MCP 调用会返回结构化失败项，不再因为单个 URL 失败吞掉整批结果；全局代理配置会统一传递给 HTTP、Playwright、XHS API 和 yt-dlp。
 
 ## 配置
 
@@ -725,11 +725,18 @@ CLI 命令仍保持原有行为；MCP 服务器也通过同一 service 层调用
 cp .env.example .env
 ```
 
+推荐直接设置一个变量，并用诊断命令验证；未设置时也会依次读取标准的 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY`：
+
+```bash
+FEEDGRAB_PROXY=socks5://127.0.0.1:8567 feedgrab doctor proxy
+```
+
 | 变量 | 必需 | 说明 |
 |------|------|------|
 | `FEEDGRAB_LOG_LEVEL` | 否 | 日志级别：`INFO`（默认）/ `DEBUG` / `WARNING` |
-| `FEEDGRAB_PROXY_ENABLED` | 否 | 启用全局代理注入（默认：`false`） |
-| `FEEDGRAB_PROXY_URL` | 否 | HTTP / SOCKS5 代理地址，如 `http://127.0.0.1:7890` |
+| `FEEDGRAB_PROXY` | 否 | 推荐的全局代理配置，设置即启用，如 `socks5://127.0.0.1:8567` |
+| `FEEDGRAB_PROXY_ENABLED` | 否 | 旧配置的启用开关；显式设为 `false` 时禁用代理 |
+| `FEEDGRAB_PROXY_URL` | 否 | 兼容旧配置的 HTTP / SOCKS5 代理地址 |
 | `FEEDGRAB_NO_PROXY` | 否 | 逗号分隔的不走代理地址，默认 `127.0.0.1,localhost`，避免本地 CDP/内部服务被代理 |
 | `X_AUTH_TOKEN` | 仅 X GraphQL | Twitter/X 认证 Cookie |
 | `X_CT0` | 仅 X GraphQL | Twitter/X CSRF 令牌 Cookie |

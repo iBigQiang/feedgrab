@@ -638,7 +638,7 @@ async def main():
 asyncio.run(main())
 ```
 
-CLI commands keep their existing behavior. The MCP server now calls the same service layer for fetch operations. Batch fetches and MCP calls expose structured failure items instead of losing the whole batch on a single URL failure, and `FEEDGRAB_PROXY_*` proxy settings are exposed through the shared service settings layer.
+CLI commands keep their existing behavior. The MCP server now calls the same service layer for fetch operations. Batch fetches and MCP calls expose structured failure items instead of losing the whole batch on a single URL failure. Global proxy settings are propagated to HTTP, Playwright, the XHS API client, and yt-dlp.
 
 ## Configuration
 
@@ -648,11 +648,18 @@ Copy `.env.example` to `.env`:
 cp .env.example .env
 ```
 
+The recommended setup uses one variable and the proxy diagnostic command. When unset, feedgrab also checks the standard `HTTPS_PROXY`, `HTTP_PROXY`, and `ALL_PROXY` variables in that order:
+
+```bash
+FEEDGRAB_PROXY=socks5://127.0.0.1:8567 feedgrab doctor proxy
+```
+
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `FEEDGRAB_LOG_LEVEL` | No | Log level: `INFO` (default) / `DEBUG` / `WARNING` |
-| `FEEDGRAB_PROXY_ENABLED` | No | Enable global proxy injection (default: `false`) |
-| `FEEDGRAB_PROXY_URL` | No | HTTP / SOCKS5 proxy URL, e.g. `http://127.0.0.1:7890` |
+| `FEEDGRAB_PROXY` | No | Recommended global proxy setting; setting it enables the proxy, e.g. `socks5://127.0.0.1:8567` |
+| `FEEDGRAB_PROXY_ENABLED` | No | Legacy enable switch; explicitly set `false` to disable proxy use |
+| `FEEDGRAB_PROXY_URL` | No | Legacy-compatible HTTP / SOCKS5 proxy URL |
 | `FEEDGRAB_NO_PROXY` | No | Comma-separated bypass list, default `127.0.0.1,localhost`, keeping local CDP/internal services direct |
 | `X_AUTH_TOKEN` | X GraphQL only | Twitter/X auth cookie |
 | `X_CT0` | X GraphQL only | Twitter/X CSRF token cookie |

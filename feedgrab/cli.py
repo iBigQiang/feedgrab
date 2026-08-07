@@ -469,7 +469,7 @@ def cmd_detect_ua():
 def cmd_doctor(platform: str = "all"):
     """Run diagnostic checks on feedgrab integrations.
 
-    platform: 'all' | 'x' | 'xhs' | 'mpweixin' | 'feishu' | 'reddit'
+    platform: 'all' | 'proxy' | 'x' | 'xhs' | 'mpweixin' | 'feishu' | 'reddit'
     """
     import time
     from pathlib import Path
@@ -513,6 +513,40 @@ def cmd_doctor(platform: str = "all"):
                 warn("patchright recommended — pip install patchright")
             except ImportError:
                 warn("No browser engine — pip install patchright")
+
+    # ── Global proxy ─────────────────────────────────────────────────
+    def check_proxy():
+        section("全局代理")
+        from feedgrab.service.doctor import DoctorService
+        from feedgrab.service.proxy import (
+            get_proxy_source,
+            get_proxy_url,
+            is_proxy_enabled,
+            redact_proxy_url,
+        )
+
+        if not is_proxy_enabled():
+            warn("代理未启用；可设置 FEEDGRAB_PROXY=socks5://127.0.0.1:8567")
+            return
+
+        source = get_proxy_source() or "未知来源"
+        proxy_url = redact_proxy_url(get_proxy_url())
+        ok(f"代理配置：{source}={proxy_url}")
+
+        result = DoctorService().check_proxy_connectivity()
+        details = result.details or {}
+        suffix = ""
+        if details.get("target"):
+            suffix += f"，目标 {details['target']}"
+        if details.get("status_code") is not None:
+            suffix += f"，状态码 {details['status_code']}"
+        message = f"{result.message}{suffix}"
+        if result.status == "ok":
+            ok(message)
+        elif result.status == "warning":
+            warn(message)
+        else:
+            fail(message)
 
     # ── Twitter/X ────────────────────────────────────────────────────
     def check_x():
@@ -805,10 +839,12 @@ def cmd_doctor(platform: str = "all"):
         "feishu": ("Feishu/Lark", check_feishu),
         "lark": ("Feishu/Lark", check_feishu),
         "reddit": ("Reddit", check_reddit),
+        "proxy": ("全局代理", check_proxy),
     }
 
     if platform == "all":
         print("feedgrab doctor — 全量诊断\n")
+        check_proxy()
         check_browser()
         check_x()
         check_xhs()
@@ -821,7 +857,7 @@ def cmd_doctor(platform: str = "all"):
         fn()
     else:
         print(f"\u274c 未知平台：{platform}")
-        print("用法：feedgrab doctor [x | xhs | mpweixin | feishu | reddit]")
+        print("用法：feedgrab doctor [proxy | x | xhs | mpweixin | feishu | reddit]")
         return
 
     # ── Summary ──────────────────────────────────────────────────────
@@ -2213,6 +2249,7 @@ def main():
     feedgrab login <platform>   登录平台并保存登录态，供浏览器兜底使用
     feedgrab detect-ua          检测真实 Chrome UA 并写入 .env
     feedgrab doctor             运行全量诊断
+    feedgrab doctor proxy       检查代理配置和外网连通性
     feedgrab doctor x           Twitter/X 诊断（Cookie、queryId、网络）
     feedgrab doctor xhs         小红书诊断（登录态、网络）
     feedgrab doctor mpweixin    微信公众号诊断（登录态、网络）

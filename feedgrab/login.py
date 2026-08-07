@@ -25,6 +25,7 @@ from pathlib import Path
 from loguru import logger
 
 from feedgrab.config import get_session_dir, get_user_agent
+from feedgrab.service.proxy import get_playwright_proxy_options
 
 PLATFORM_URLS = {
     "xhs": "https://www.xiaohongshu.com/explore",
@@ -182,6 +183,7 @@ def _login_visible(login_url: str, session_path: Path, platform: str) -> None:
         ) as profile_dir:
             # Persistent Chrome keeps login fingerprint closer to a normal browser,
             # while the temporary profile guarantees each manual login starts clean.
+            proxy_options = get_playwright_proxy_options()
             context = p.chromium.launch_persistent_context(
                 profile_dir,
                 headless=False,
@@ -189,6 +191,7 @@ def _login_visible(login_url: str, session_path: Path, platform: str) -> None:
                 user_agent=get_user_agent(),
                 args=_visible_login_args(),
                 ignore_default_args=["--enable-automation", "--no-sandbox"],
+                **({"proxy": proxy_options} if proxy_options else {}),
             )
             page = _prepare_login_page(context, login_url)
 
@@ -637,7 +640,11 @@ def _login_headless(login_url: str, session_path: Path, canonical: str) -> None:
     print("   正在等待登录（超时：5 分钟）...\n")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        proxy_options = get_playwright_proxy_options()
+        browser = p.chromium.launch(
+            headless=True,
+            **({"proxy": proxy_options} if proxy_options else {}),
+        )
         context = browser.new_context(
             user_agent=get_user_agent(),
         )

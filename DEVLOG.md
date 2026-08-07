@@ -2,6 +2,24 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-08-07 · v0.26.1 · 全局代理兼容与连通性诊断
+
+### 改动
+
+- 新增单变量配置 `FEEDGRAB_PROXY`，设置 HTTP / SOCKS5 地址即自动启用；继续兼容 `FEEDGRAB_PROXY_ENABLED` + `FEEDGRAB_PROXY_URL`，并支持标准 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` 回退。
+- 将代理统一传递给 HTTP 客户端、Playwright 浏览器、登录窗口、小红书 API 客户端和 yt-dlp 下载链路；补充 Requests / HTTPX 的 SOCKS 依赖。
+- 新增 `feedgrab doctor proxy`，显示代理来源和脱敏地址，并通过多个外网目标检测连通性，避免单一检测站点超时造成误判。
+
+### 验证
+
+- `python -m pytest tests/test_proxy.py tests/test_service_layer.py tests/test_user_visible_messages.py tests/test_reddit.py -q`：41 passed。
+- 排除上游 5 个已知夹具/目录问题后的全量测试：255 passed, 5 deselected；直接全量测试为 255 passed, 5 failed，失败项与 v0.26.0 记录的基线问题一致。
+- 使用 `socks5://172.29.144.1:8567` 实测 `feedgrab doctor proxy`：通过 `https://x.com`，HTTP 200；同一代理下 Reddit 浏览器兜底成功抓取目标帖子正文。
+
+### 状态：已完成 ✅
+
+---
+
 ## 2026-07-03 · v0.26.0 · main CLI 对齐桌面端 0.1.14 后端能力
 
 ### 背景

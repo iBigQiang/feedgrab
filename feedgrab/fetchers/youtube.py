@@ -19,6 +19,7 @@ import tempfile
 import unicodedata
 from loguru import logger
 from typing import Dict, Any, List, Optional, Tuple
+from feedgrab.service.proxy import get_ytdlp_proxy_args
 
 
 def _js_runtime_args() -> list:
@@ -454,6 +455,7 @@ def _get_subtitles_via_ytdlp(url: str, lang: str = "en") -> List[Dict]:
             "yt-dlp",
             *_js_runtime_args(),
             *_cookies_args(),
+            *get_ytdlp_proxy_args(),
             "--write-auto-sub",
             "--write-sub",
             "--sub-lang", lang,
@@ -676,6 +678,7 @@ def _transcribe_via_whisper(url: str) -> List[Dict]:
         base_cmd = [
             "yt-dlp",
             *_js_runtime_args(),
+            *get_ytdlp_proxy_args(),
             "-x",
             "--audio-format", "m4a",
             "--audio-quality", "5",

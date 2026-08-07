@@ -16,18 +16,64 @@ _PROXY_ENV_KEYS = (
     "all_proxy",
 )
 _NO_PROXY_ENV_KEYS = ("NO_PROXY", "no_proxy")
+_SYSTEM_PROXY_ENV_KEYS = (
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "ALL_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "all_proxy",
+)
+
+
+def _as_bool(value: object) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def is_proxy_enabled(value: object | None = None) -> bool:
     """Return whether proxy support is enabled by setting/env value."""
-    raw = os.getenv("FEEDGRAB_PROXY_ENABLED", "") if value is None else value
-    if isinstance(raw, bool):
-        return raw
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+    if isinstance(value, bool):
+        return value
+    if value is not None:
+        return _as_bool(value)
+    raw = os.getenv("FEEDGRAB_PROXY_ENABLED")
+    if raw is not None:
+        return _as_bool(raw)
+    return bool(get_proxy_url())
 
 
 def get_proxy_url() -> str:
-    return os.getenv("FEEDGRAB_PROXY_URL", "").strip()
+    legacy_enabled = os.getenv("FEEDGRAB_PROXY_ENABLED")
+    if legacy_enabled is not None and not _as_bool(legacy_enabled):
+        return ""
+
+    shorthand = os.getenv("FEEDGRAB_PROXY", "").strip()
+    if shorthand:
+        return shorthand
+
+    if legacy_enabled is not None:
+        return os.getenv("FEEDGRAB_PROXY_URL", "").strip()
+
+    legacy_url = os.getenv("FEEDGRAB_PROXY_URL", "").strip()
+    if legacy_url:
+        return legacy_url
+    for key in _SYSTEM_PROXY_ENV_KEYS:
+        value = os.getenv(key, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def get_proxy_source() -> str:
+    """Return the environment variable supplying the active proxy URL."""
+    if os.getenv("FEEDGRAB_PROXY", "").strip():
+        return "FEEDGRAB_PROXY"
+    if os.getenv("FEEDGRAB_PROXY_URL", "").strip() and is_proxy_enabled():
+        return "FEEDGRAB_PROXY_URL"
+    for key in _SYSTEM_PROXY_ENV_KEYS:
+        if os.getenv(key, "").strip() and is_proxy_enabled():
+            return key
+    return ""
 
 
 def get_no_proxy() -> str:
@@ -119,3 +165,11 @@ def get_playwright_proxy_options() -> dict[str, str]:
     if bypass:
         options["bypass"] = bypass
     return options
+
+
+def get_ytdlp_proxy_args() -> list[str]:
+    """Return yt-dlp command-line proxy arguments for the active proxy."""
+    if not is_proxy_enabled():
+        return []
+    url = get_proxy_url()
+    return ["--proxy", url] if url else []
