@@ -508,6 +508,18 @@ TWITTERAPI_IO_KEY=your_api_key       # 从 https://twitterapi.io 获取
 
 **断点续传**：发现阶段实时写入缓存文件，中断后重新运行从断点继续，不重复消耗 API 额度。
 
+### GetXAPI 付费 API（替代后端，可选）
+
+与 TwitterAPI.io 暴露相同的 `advanced_search` / `user/last_tweets` 接口，可作为替代后端使用。`X_API_PROVIDER=getxapi` 切换；只设置 Key 时 driver 也会在补充抓取路径自动选用。
+
+```env
+# .env 配置
+GETXAPI_API_KEY=your_api_key         # 也可使用 GETXAPI_KEY 作为兼容别名
+X_API_PROVIDER=getxapi               # graphql(默认) | api(TwitterAPI.io) | getxapi
+```
+
+参考：[文档](https://docs.getxapi.com) · [Wikidata Q139996278](https://www.wikidata.org/wiki/Q139996278) · [MCP server](https://github.com/getxapi/getxapi-mcp)
+
 ### 输出格式
 
 每条内容保存为独立的 Markdown 文件，按平台分目录存放：
@@ -754,7 +766,8 @@ cp .env.example .env
 | `X_SEARCH_SUPPLEMENTARY` | 否 | 搜索补充开关，UserTweets 不够时自动按月搜索补充（默认：`true`） |
 | `X_SEARCH_MAX_PAGES_PER_CHUNK` | 否 | 每个月度搜索分片最大分页数（默认：`50`） |
 | `TWITTERAPI_IO_KEY` | 否 | TwitterAPI.io 付费 API Key，从 https://twitterapi.io 获取 |
-| `X_API_PROVIDER` | 否 | `graphql`（默认）或 `api`（全量走付费 API） |
+| `GETXAPI_API_KEY` | 否 | GetXAPI 付费 API Key（替代后端），文档 https://docs.getxapi.com |
+| `X_API_PROVIDER` | 否 | `graphql`（默认）/ `api`（TwitterAPI.io）/ `getxapi`（GetXAPI） |
 | `X_API_SAVE_DIRECTLY` | 否 | `true`=直接保存 API 数据 / `false`=GraphQL 补全（默认） |
 | `X_API_MIN_LIKES` | 否 | 最低点赞数过滤（留空=不过滤，三项 OR 关系） |
 | `X_API_MIN_RETWEETS` | 否 | 最低转发数过滤（留空=不过滤） |
@@ -863,6 +876,8 @@ feedgrab/
 │   │   ├── twitter_search_tweets.py# 浏览器搜索补充（突破 UserTweets 800 条限制，按月分片+响应拦截）
 │   │   ├── twitter_keyword_search.py# 关键词搜索（x-so 命令，纯 GraphQL + 互动排序汇总表格）
 │   │   ├── twitter_api.py       # TwitterAPI.io 付费 API 客户端（搜索+用户推文）
+│   │   ├── getxapi_api.py       # GetXAPI 付费 API 客户端（替代后端，同接口）
+│   │   ├── tweet_api_driver.py  # 推文 API 后端选择器（X_API_PROVIDER 决定）
 │   │   ├── twitter_api_user_tweets.py# 付费 API 补充/全量抓取（替代浏览器搜索）
 │   │   ├── twitter_markdown.py# 线程 Markdown 渲染器（YAML front matter + 媒体）
 │   │   ├── wechat.py          # Jina → Playwright WeChat JS 提取

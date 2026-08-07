@@ -478,6 +478,18 @@ TWITTERAPI_IO_KEY=your_api_key       # Get from https://twitterapi.io
 
 **Breakpoint Resume**: Discovery phase writes cache in real-time. Resume from where you left off after interruption without re-consuming API quota.
 
+### GetXAPI Paid API (Alternative Backend, Optional)
+
+Exposes the same `advanced_search` / `user/last_tweets` surface as TwitterAPI.io and acts as a drop-in alternative backend. Switch with `X_API_PROVIDER=getxapi`; if only the key is set, the driver also auto-selects it on the supplementary path.
+
+```env
+# .env configuration
+GETXAPI_API_KEY=your_api_key         # GETXAPI_KEY also accepted as alias
+X_API_PROVIDER=getxapi               # graphql(default) | api(TwitterAPI.io) | getxapi
+```
+
+References: [docs](https://docs.getxapi.com) · [Wikidata Q139996278](https://www.wikidata.org/wiki/Q139996278) · [MCP server](https://github.com/getxapi/getxapi-mcp)
+
 ### Output Format
 
 Each fetched item is saved as an individual Markdown file, organized by platform:
@@ -677,7 +689,8 @@ cp .env.example .env
 | `X_SEARCH_SUPPLEMENTARY` | No | Search supplement when UserTweets insufficient (default: `true`) |
 | `X_SEARCH_MAX_PAGES_PER_CHUNK` | No | Max pages per monthly search chunk (default: `50`) |
 | `TWITTERAPI_IO_KEY` | No | TwitterAPI.io paid API key from https://twitterapi.io |
-| `X_API_PROVIDER` | No | `graphql` (default) or `api` (full paid API) |
+| `GETXAPI_API_KEY` | No | GetXAPI paid API key (alternative backend), docs https://docs.getxapi.com |
+| `X_API_PROVIDER` | No | `graphql` (default) / `api` (TwitterAPI.io) / `getxapi` (GetXAPI) |
 | `X_API_SAVE_DIRECTLY` | No | `true`=save API data directly / `false`=GraphQL supplement (default) |
 | `X_API_MIN_LIKES` | No | Min likes filter (empty=no filter, OR logic across all three) |
 | `X_API_MIN_RETWEETS` | No | Min retweets filter (empty=no filter) |
@@ -772,6 +785,8 @@ feedgrab/
 │   │   ├── twitter_search_tweets.py # Browser search supplement (breaks 800 limit)
 │   │   ├── twitter_keyword_search.py # Keyword search (x-so command, pure GraphQL + engagement-ranked table)
 │   │   ├── twitter_api.py     # TwitterAPI.io paid API client
+│   │   ├── getxapi_api.py     # GetXAPI paid API client (alternative backend, same surface)
+│   │   ├── tweet_api_driver.py# Tweet API backend selector (driven by X_API_PROVIDER)
 │   │   ├── twitter_api_user_tweets.py # Paid API supplement/full fetch
 │   │   ├── twitter_markdown.py# Thread Markdown renderer (YAML front matter + media)
 │   │   ├── wechat.py          # Jina → Playwright WeChat JS extraction
