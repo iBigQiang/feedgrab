@@ -92,3 +92,60 @@
 - [x] 端到端实测（0.1.17→0.1.18）：更新按钮 → 弹窗 → 气泡进度 → 376926034 bytes 完整落盘 → 安装器启动成功 → 注册表 DisplayVersion 0.1.18
 - [x] 追加：spawn 参数补 --force-run，静默安装完成后自动重启新版应用（实测 D:\feedgrab Desktop 自动拉起）；安装中气泡文案说明静默安装行为
 - [x] 实测遗留清理：package.json 版本还原 0.1.18、临时脚本/日志/TEMP 安装包已删
+
+---
+
+# 公众号批量采集 200013 限流与失败页落盘修复 · 2026-08-21
+
+> 方案文档：`docs/开发及迭代方案调研报告/2026-08-21-微信公众号批量采集200013限流与失败页落盘修复方案.md`
+> 触发：`feedgrab mpweixin-id "袋鼠帝AI客栈"` 报 ret=200013，CLI 却打印"✅ 抓取完成，总数 0"
+
+## 诊断（已完成）
+
+- [x] 实测拿到微信官方原文 `{"ret":200013,"err_msg":"freq control"}`
+- [x] 限流边界矩阵：换目标号(4个)/换微信账号/换接口/换 count(1,5,20) 全部 200013；查自己的号 + searchbiz + 单篇正文 + 搜狗全部正常
+- [x] 根因：历史已抓 782 篇 × page_size=5 = 150+ 次列表请求，配额耗尽
+- [x] 连带查出 44 篇失败页空壳落盘（39 篇源内容失效 + 5 篇风控验证页），产生于 `browser.py:783-798` fallback 分支
+- [x] 连带查出残留进度 `next_begin=15` 因清理条件缺陷永远清不掉 → 老码小张最新 15 篇永远漏抓
+- [x] 已核验 5 篇风控页对应真实 URL 未入 dedup，重跑可补回
+
+## 实施
+
+- [x] P0-1 限流不再谎报成功：`MPWeixinFreqControlError` + 日志补 err_msg + CLI 明确报错并 exit(1)（未知 ret 也一并改为抛出，原先静默当"列表读完"）
+- [x] P0-2 失败页识别：`browser.py` 加 `detect_wechat_unavailable` → `unavailable_reason`；**四条链路全部接入**（单篇 wechat.py 明确终止不降级 Jina / 批量 mpweixin_account.py / 专辑 mpweixin_album.py / 搜狗 wechat_search.py）；删除违规隐私 skip+入 dedup、captcha fail 不落盘不入 dedup、连续 5 篇 captcha 中止
+- [x] P0-3 进度语义：页内保存写当前页 begin、整页完成才推进；`completed` 标志，仅正常读完/日期截止才清进度
+- [x] P1 减压配置：`MPWEIXIN_ID_PAGE_SIZE=20` / `PAGE_DELAY=8` / `PAGE_JITTER=0.4` / `MAX_ARTICLES=0` / `FREQ_RETRY=0`
+- [x] P0-4 存量清理：44 篇空壳 md（893→849）+ 1 个残留进度文件，删除前已备份至 `.tmp/removed_wechat_shells/`
+- [x] `.env.example` 同步新配置 + 限流成因说明
+
+## 验证
+
+- [x] 限流呈现实测：日志 `ret=200013 err_msg=freq control`，CLI 中文说明 + 建议，退出码 1，无 ✅；`offset=0 count=20` 新页长已生效
+- [x] 失败页识别实测：已删除文章 URL → "该内容已被发布者删除"，未降级 Jina、未落盘、退出码 1
+- [x] 搜狗链路实测：已删除 / 违规 / 隐私三类 URL 分别返回 `deleted` / `violation` / `privacy`
+- [x] 正常路径不回归实测：正常文章 `Browser OK` 完整落盘，退出码 0
+- [x] 单测：限流抛出 + 进度保留 + 占位页四态 + dedup 分流 + 抖动区间 + 配置上限 + 空页边界
+- [x] 全量回归 `pytest tests --basetemp=.tmp/pytest-tmp`：380 passed（基线 361，+19）
+- [x] `count` 上限实测：用「查自己的号」绕开 200013，`count=5/20/40` 均 `ret=0 ok`，确认调大页长不会被服务端拒绝
+- [x] 桌面端链路核验：`FetchService` 抛 `ServiceError` → `worker._emit_exception` 提取 code/message 发渲染进程 → 批量 continue 不中断
+- [x] 收尾三关：质量门禁（380 passed + compileall）/ 代码审查（发现并修复 1 处）/ 安全审查（无 HIGH/MEDIUM 发现）
+
+## 待限流解除后补测（不阻塞本轮交付）
+
+- [ ] `MPWEIXIN_ID_PAGE_SIZE=20` 是否被微信受理（count 实际上限未知，限流态下无法验证）
+- [ ] 完整批量端到端跑通 + 5 篇风控页补抓验证
+- [ ] 限流冷却时长观测（未做，探测请求本身可能刷新滑动窗口，需低频 20-30 分钟一次）
+
+## 复盘
+
+**这个 bug 的真正代价不是限流本身，而是限流被伪装成成功。** 微信的 `freq control` 是外部客观限制，等就完事；但 `_fetch_article_list` 把 `ret != 0` 一律 `return [], True, 0`（"列表读完了"），上层照常走完流程打印 ✅，用户看到"总数 0，已抓取 0"完全无从判断发生了什么。同一个坏模式在 `evaluate_wechat_article` 的 fallback 分支重演一次：页面没有 `#js_content` 就把 `page.title()` + `body.innerText` 当成功结果返回，于是 44 篇占位页变成了标题"微信公众平台"的空壳 md，还都计入了 `fetched`。
+
+**共同点**：把"拿到了一个响应"等同于"拿到了想要的东西"。修法也一致——让失败态有名字（`unavailable_reason` / 专用异常），让调用方能分流，让 CLI 能如实报告。
+
+**诊断顺序值得复用**：先拿官方原文（`err_msg` 而不是裸 ret 码），再做边界矩阵（换目标/换账号/换接口/换参数四个维度），矩阵一出来，"多账号轮换"这个最直觉的方案当场被否决，省掉了一轮无效实现。
+
+**范围扩张是对的**：原方案只写了批量层接入占位页识别，实施中发现 `evaluate_wechat_article` 被四条链路共用，只改一处等于留三个同样的洞。搜狗链路还自己复制了一份 fallback 逻辑，必须同步改。
+
+**收尾审查抓到了自己挖的坑**：`/code-review` 查出我新加的 `if not articles: completed = True` 把"本页没解出图文"当成"列表读完"，会清进度并漏抓后续——和这次要消灭的那类静默失败一模一样。实测确认 `is_complete` 只在 `publish_list` 为空时为真（`begin=0 size=20 → articles=12, is_complete=False`），两者语义不同，已收紧并补测试。**教训**：修某类 bug 时最容易用同一类写法引入它，收尾审查不能因为"是我刚写的"就跳过。
+
+**遗留**：完整批量端到端仍被限流挡着（`count=20` 已单独实测被服务端受理）；冷却时长未观测；`art_page` 异常时不关闭是 pre-existing 泄漏，本轮未修（见 DEVLOG 已知遗留）。

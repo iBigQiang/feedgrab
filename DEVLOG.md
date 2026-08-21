@@ -2,6 +2,67 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-08-21 · v0.26.6-dev · 微信公众号 200013 限流不再谎报成功 + 占位页落盘修复
+
+### 背景
+
+用户跑 `feedgrab mpweixin-id "袋鼠帝AI客栈"` 报 `ret=200013`，但 CLI 紧接着打印"✅ 微信公众号账号批量抓取完成，总数 0"——失败被报告成成功。用户确认 MP 后台 Cookie 是当天更新且有效的。
+
+### 实测诊断
+
+微信官方原文：`{"ret": 200013, "err_msg": "freq control"}`（频率控制），现有代码只记录 `ret`、丢弃 `err_msg`。
+
+限流边界矩阵（全部真实请求）：
+
+| 探测项 | 结果 |
+| --- | --- |
+| searchbiz 搜号 / 查**自己**的号 / appmsg type=10 自己的素材 | `ret=0 ok` |
+| appmsgpublish 查他人 count=5 / 20 / **1** | `200013` |
+| appmsg type=9 老接口查他人 | `200013` |
+| 换 4 个目标号（量子位 / 机器之心 / InfoQ / 袋鼠帝） | 全部 `200013` |
+| 换第二个微信账号（不同 bizuin/token） | 全部 `200013` |
+| profile_ext 历史消息页 | `ret=-3 no session`（需微信客户端） |
+| 单篇正文抓取 / 搜狗 `mpweixin-so` | 正常 |
+
+**结论**：限流精确作用于「用 MP 后台查询**他人**公众号文章列表」这一能力，与目标号、微信账号、接口版本、`count` 取值均无关；`count=1` 也被拒，说明按**请求次数**计量，改参数无法规避。登录态本身健康。**根因**：笔记库中已抓 782 篇（老码小张 336 + 新智元 330 + 饼干哥哥 116），而 `page_size=5`，等于打了 150+ 次列表请求，配额耗尽。
+
+连带查出：笔记库 44 篇 md 标题为"微信公众平台"、正文 22–49 字，是被当作文章保存的占位页（26 已删除 / 11 违规 / 2 隐私 / **5 风控验证页**），全部计入了 `fetched` 成功数。产生于 `browser.py` 中 `evaluate_wechat_article` 的 fallback 分支——页面无 `#js_content` 时直接用 `page.title()` + `body.innerText` 构造"成功"结果。另有残留进度 `next_begin=15`，因清理条件 `if not date_cutoff_reached or fetched > 0` 在"全部 dedup 跳过 + 触发日期截止"时恒为假而永远清不掉，导致老码小张最新 15 篇每次都被跳过。
+
+### 实施
+
+- **限流不再谎报**（`mpweixin_account.py`）：新增 `MPWeixinFreqControlError` / `MPWeixinRiskControlError`；`_fetch_article_list` 日志补 `err_msg`，200013 抛异常，其余非 0 错误也改为抛出（原先静默当作"列表读完"）；`result` 新增 `interrupted` 字段；CLI 区分"完成 ✅"与"未完成 ⚠"，中断时提示进度已保存。
+- **占位页识别**（`browser.py` 新增 `detect_wechat_unavailable`）：5 类文案归一为 `deleted` / `violation` / `privacy` / `captcha`，仅在缺少 `#js_content` 时判定，且要求"标题退化为微信公众平台"+"正文命中已知文案"双条件（风控 URL 单条件即可），文案变更时退化为原行为不误杀正常文章。**四条链路全部接入**：单篇 `wechat.py`（明确终止不降级到 Jina，避免 Jina 抓同一占位页文案）、批量 `mpweixin_account.py`、专辑 `mpweixin_album.py`、搜狗 `wechat_search.py`。分流策略：删除/违规/隐私 → 计 skipped 且写 dedup（确实无需再抓）；**风控页 → 计 failed，不落盘不写 dedup**（保持可重试），连续 5 篇风控则中止本轮。
+- **进度语义修复**：页内逐篇保存写当前页 `begin`，整页处理完才推进，消除"页内中断跳篇"；引入 `completed` 标志，仅列表读完或日期截止才清进度，限流/异常一律保留。
+- **减压配置**（默认值已生效）：`MPWEIXIN_ID_PAGE_SIZE=20`（列表请求数降至 1/4）、`MPWEIXIN_ID_PAGE_DELAY=8`、`MPWEIXIN_ID_PAGE_JITTER=0.4`、`MPWEIXIN_ID_MAX_ARTICLES=0`、`MPWEIXIN_ID_FREQ_RETRY=0`（退避 60s/300s/900s，默认关闭）。
+- **存量清理**：删除 44 篇占位页空壳（893 → 849 篇）+ 1 个残留进度文件，删除前整体备份。
+
+### 已实测否决的方案
+
+多微信账号轮换（换号同样 200013，配额不按账号计）、调整 count / 改用 appmsg 老接口 / 换目标号（全部 200013）、`profile_ext` 历史消息页（需微信客户端登录态）。
+
+### 验证结果
+
+- `pytest tests --basetemp=.tmp/pytest-tmp`：**380 passed**（361 → 380，新增 19 个用例覆盖限流抛出、进度保留、空页边界、占位页四态识别、dedup 分流、抖动区间、配置上限）。
+- **限流呈现实测**（当时正处限流态）：日志输出 `ret=200013 err_msg=freq control`，CLI 打印中文限流说明与三条建议，退出码 1，不再出现 ✅；日志确认 `offset=0 count=20` 新页长已生效。
+- **`count` 上限实测**：用「查自己的号」绕开 200013（同一接口、同一套 `count` 解析），`count=5/20/40` 均 `ret=0 ok`（`count=20` 返回该号全部 12 条），确认调大页长不会被服务端拒绝。
+- **占位页识别实测**：`feedgrab https://mp.weixin.qq.com/s/H7YS5wlC4Rfv_lilxujC3A` → "微信文章不可抓取：该内容已被发布者删除"，未降级 Jina、未落盘、退出码 1。搜狗链路对已删除 / 违规 / 隐私三类 URL 分别返回 `deleted` / `violation` / `privacy`。
+- **正常路径不回归**：抓取当日新文（歸藏的AI工具箱 2026-08-21）成功，10751 bytes、正文 2949 字、12 张图、front matter 完整，占位页检测对其返回空（未误伤）。
+- **桌面端链路**：`FetchService.fetch_url()` 抛 `ServiceError`，`worker.py` 的 `_emit_exception` 提取 code/message 发给渲染进程并 `continue`，批量不中断。行为由"静默存空壳并计成功"变为"明确报错并计入 errors"。
+
+### 代码审查发现并修复（收尾阶段）
+
+`/code-review` 查出本次改动自身引入的一处边界缺陷：`if not articles: completed = True` 把"本页没解出图文"等同于"列表读完"，会清掉进度并漏抓后续文章——正是本次要消灭的那类静默失败。实测确认两者语义不同（`begin=0 size=20 → articles=12, is_complete=False`，分页要靠下一页返回空才终止），已收紧为仅 `is_complete` 时才算读完，空页继续翻页，并补测试 `test_empty_page_is_not_treated_as_end_of_listing`。
+
+### 已知遗留（不阻塞本次交付）
+
+- `art_page` 在 `evaluate_wechat_article` 抛异常时不会关闭（pre-existing，account/album 两处同形），长批量下可能累积页面句柄。
+- `mpweixin_album.py` 跨模块导入私有函数 `_record_unavailable`，可接受但非最佳形态。
+- 占位页文案匹配依赖微信页面文案，微信改版会漏判；漏判时退化为原行为（落盘），不会误杀正常文章。
+
+### 状态：已完成 ✅（限流解除后需补测完整批量端到端 + 5 篇风控页补抓）
+
+---
+
 ## 2026-07-10 · 桌面端自动更新修复：安装包 0 字节导致 spawn EFTYPE + 进度/报错改左下角气泡
 
 ### 背景

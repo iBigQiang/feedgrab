@@ -655,6 +655,40 @@ WECHAT_ARTICLE_JS_EVALUATE = """() => {
 }"""
 
 
+# WeChat placeholder pages served instead of article content.  Each entry maps
+# a normalized reason to the page phrases that identify it.  Order matters:
+# captcha is checked first since a risk-control page can also carry other text.
+WECHAT_UNAVAILABLE_PATTERNS = (
+    ("captcha", ("环境异常", "完成验证后即可继续访问")),
+    ("deleted", ("该内容已被发布者删除",)),
+    ("privacy", ("根据作者隐私设置",)),
+    ("violation", ("此内容因违规无法查看", "此内容发送失败无法查看")),
+)
+
+
+def detect_wechat_unavailable(title: str, text: str, url: str = "") -> str:
+    """Classify a WeChat article page that carries no article body.
+
+    Returns a normalized reason ("captcha" / "deleted" / "privacy" /
+    "violation") or "" when the page does not look like a known placeholder.
+
+    Only called when #js_content is absent, so a real article can never reach
+    here.  Detection requires both a degraded title ("微信公众平台") and a known
+    body phrase, except for the risk-control URL which is conclusive on its own.
+    A phrase change on WeChat's side degrades to the previous behaviour (page
+    saved as-is) rather than dropping a valid article.
+    """
+    if "wappoc_appmsgcaptcha" in (url or ""):
+        return "captcha"
+    if (title or "").strip() not in ("微信公众平台", ""):
+        return ""
+    body = text or ""
+    for reason, phrases in WECHAT_UNAVAILABLE_PATTERNS:
+        if any(p in body for p in phrases):
+            return reason
+    return ""
+
+
 def _build_wechat_result(data: dict, page_url: str, md_converter=None) -> dict:
     """Convert raw WeChat JS evaluate output to a standardized result dict.
 
@@ -784,7 +818,7 @@ async def evaluate_wechat_article(page, md_converter=None) -> dict:
         # Fallback: grab raw text
         title = await page.title()
         text = await page.evaluate("() => document.body.innerText")
-        return {
+        result = {
             "title": (title or "").strip()[:200],
             "content": (text or "").strip(),
             "author": "",
@@ -796,6 +830,12 @@ async def evaluate_wechat_article(page, md_converter=None) -> dict:
             "tags": [],
             "original_url": "",
         }
+        # Flag known placeholder pages (deleted / violation / privacy / risk
+        # control) so callers can skip them instead of saving an empty shell.
+        reason = detect_wechat_unavailable(result["title"], result["content"], page.url)
+        if reason:
+            result["unavailable_reason"] = reason
+        return result
 
     return _build_wechat_result(data, page.url, md_converter)
 

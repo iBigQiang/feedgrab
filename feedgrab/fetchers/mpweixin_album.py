@@ -323,52 +323,63 @@ async def fetch_album_articles(
                             art_page, md_converter=_html_to_markdown,
                         )
 
-                        # Fetch comments before closing page
-                        if _fetch_comments and art_data.get("comment_id"):
-                            cmt = await fetch_wechat_comments(
-                                art_page, art_data["comment_id"],
-                                appmsg_token=art_data.get("appmsg_token", ""),
-                                max_comments=_max_comments,
+                        # Placeholder page (deleted / violation / privacy / risk
+                        # control) — account for it instead of saving a shell.
+                        reason = art_data.get("unavailable_reason", "")
+                        if reason:
+                            await art_page.close()
+                            from feedgrab.fetchers.mpweixin_account import _record_unavailable
+                            _record_unavailable(
+                                reason, title, link, item_id, result, dedup_index,
+                                log_prefix="mpweixin-zhuanji",
                             )
-                            if cmt:
-                                art_data["comment_list"] = cmt
-
-                        await art_page.close()
-
-                        # Fallback metadata from album API
-                        if not art_data.get("title"):
-                            art_data["title"] = title
-                        if not art_data.get("cover_image"):
-                            art_data["cover_image"] = art.get("cover", "")
-
-                        # Save
-                        safe_album = album_name or album_id
-                        item = from_wechat(art_data)
-                        item.category = f"zhuanji/{safe_album}"
-                        saved_path = save_to_markdown(item)
-
-                        # Download media if enabled
-                        if saved_path and (item.extra.get("videos") or item.extra.get("images")):
-                            from feedgrab.config import mpweixin_download_media
-                            if mpweixin_download_media():
-                                from feedgrab.utils.media import download_media
-                                download_media(
-                                    saved_path,
-                                    item.extra.get("images", []),
-                                    item.extra.get("videos", []),
-                                    item.id,
-                                    platform="wechat",
+                        else:
+                            # Fetch comments before closing page
+                            if _fetch_comments and art_data.get("comment_id"):
+                                cmt = await fetch_wechat_comments(
+                                    art_page, art_data["comment_id"],
+                                    appmsg_token=art_data.get("appmsg_token", ""),
+                                    max_comments=_max_comments,
                                 )
+                                if cmt:
+                                    art_data["comment_list"] = cmt
 
-                        if item_id:
-                            add_item(item_id, link, dedup_index)
+                            await art_page.close()
 
-                        result["fetched"] += 1
-                        result["articles"].append({
-                            "title": art_data.get("title", ""),
-                            "publish_date": art_data.get("publish_date", ""),
-                            "url": link,
-                        })
+                            # Fallback metadata from album API
+                            if not art_data.get("title"):
+                                art_data["title"] = title
+                            if not art_data.get("cover_image"):
+                                art_data["cover_image"] = art.get("cover", "")
+
+                            # Save
+                            safe_album = album_name or album_id
+                            item = from_wechat(art_data)
+                            item.category = f"zhuanji/{safe_album}"
+                            saved_path = save_to_markdown(item)
+
+                            # Download media if enabled
+                            if saved_path and (item.extra.get("videos") or item.extra.get("images")):
+                                from feedgrab.config import mpweixin_download_media
+                                if mpweixin_download_media():
+                                    from feedgrab.utils.media import download_media
+                                    download_media(
+                                        saved_path,
+                                        item.extra.get("images", []),
+                                        item.extra.get("videos", []),
+                                        item.id,
+                                        platform="wechat",
+                                    )
+
+                            if item_id:
+                                add_item(item_id, link, dedup_index)
+
+                            result["fetched"] += 1
+                            result["articles"].append({
+                                "title": art_data.get("title", ""),
+                                "publish_date": art_data.get("publish_date", ""),
+                                "url": link,
+                            })
                     except Exception as e:
                         logger.error(f"[mpweixin-zhuanji] Failed: {title[:40]} — {e}")
                         result["failed"] += 1

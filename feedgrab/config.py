@@ -715,6 +715,56 @@ def mpweixin_id_delay() -> float:
         return 3.0
 
 
+def mpweixin_id_page_size() -> int:
+    """Articles per list-API request (default 20, capped at 20).
+
+    Fewer list calls is the main lever for staying under WeChat's freq-control
+    quota (ret=200013): the quota counts requests, not articles.  The real
+    server-side cap on `count` is unverified, so values are clamped to 20.
+    """
+    try:
+        val = int(os.getenv("MPWEIXIN_ID_PAGE_SIZE", "20"))
+    except ValueError:
+        return 20
+    return max(1, min(val, 20))
+
+
+def mpweixin_id_page_delay() -> float:
+    """Delay in seconds between list-API pages (default 8.0)."""
+    try:
+        return max(0.0, float(os.getenv("MPWEIXIN_ID_PAGE_DELAY", "8.0")))
+    except ValueError:
+        return 8.0
+
+
+def mpweixin_id_page_jitter() -> float:
+    """Random jitter ratio for the page delay (default 0.4 = up to ±40%)."""
+    try:
+        return max(0.0, min(float(os.getenv("MPWEIXIN_ID_PAGE_JITTER", "0.4")), 1.0))
+    except ValueError:
+        return 0.4
+
+
+def mpweixin_id_max_articles() -> int:
+    """Cap on articles processed in one batch run (default 0 = unlimited)."""
+    try:
+        return max(0, int(os.getenv("MPWEIXIN_ID_MAX_ARTICLES", "0")))
+    except ValueError:
+        return 0
+
+
+def mpweixin_id_freq_retry() -> int:
+    """Retries after hitting ret=200013 freq control (default 0 = no retry).
+
+    Backoff is 60s / 300s / 900s.  Defaults to 0 because a freq-control block
+    typically outlasts any in-run wait; retrying only burns more quota.
+    """
+    try:
+        return max(0, int(os.getenv("MPWEIXIN_ID_FREQ_RETRY", "0")))
+    except ValueError:
+        return 0
+
+
 # ---------------------------------------------------------------------------
 # WeChat MP album batch fetch (mpweixin-zhuanji)
 # ---------------------------------------------------------------------------

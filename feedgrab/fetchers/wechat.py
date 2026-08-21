@@ -15,6 +15,27 @@ from loguru import logger
 from typing import Dict, Any
 
 
+# Placeholder reasons produced by browser.detect_wechat_unavailable().
+WECHAT_UNAVAILABLE_LABELS = {
+    "deleted": "该内容已被发布者删除",
+    "violation": "该内容因违规无法查看",
+    "privacy": "该内容受作者隐私设置限制",
+    "captcha": "被微信风控验证页拦截（稍后重试可能恢复）",
+}
+
+
+class WeChatUnavailableError(RuntimeError):
+    """WeChat served a placeholder page instead of the article body."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        label = WECHAT_UNAVAILABLE_LABELS.get(reason, reason)
+        super().__init__(
+            f"微信文章不可抓取：{label}。\n"
+            "   微信返回的是占位页而非文章正文，已终止抓取，不保存空白 Markdown。"
+        )
+
+
 async def _browser_fetch(url: str) -> Dict[str, Any]:
     """Fetch WeChat article via stealth browser with WeChat-specific JS extraction."""
     from feedgrab.fetchers.browser import (
@@ -40,6 +61,12 @@ async def _browser_fetch(url: str) -> Dict[str, Any]:
             result = await evaluate_wechat_article(
                 page, md_converter=_html_to_markdown,
             )
+            # WeChat serves a placeholder page (deleted / violation / privacy /
+            # risk control) with a non-empty body, so the empty-content check
+            # below never catches it — that is how "微信公众平台" shells got saved.
+            reason = result.get("unavailable_reason", "")
+            if reason:
+                raise WeChatUnavailableError(reason)
             if not result.get("content"):
                 raise ValueError("Browser extraction returned empty content")
 
@@ -79,6 +106,11 @@ async def fetch_wechat(url: str) -> Dict[str, Any]:
     try:
         logger.info(f"[WeChat] Tier 1 — Browser: {url}")
         return await _browser_fetch(url)
+    except WeChatUnavailableError:
+        # A placeholder page is a definitive answer, not a transient failure:
+        # falling through would just let Jina scrape the same placeholder text
+        # into a Markdown file.
+        raise
     except Exception as e:
         logger.warning(f"[WeChat] Browser failed ({e}), falling back to Jina")
 
@@ -110,6 +142,8 @@ async def fetch_wechat(url: str) -> Dict[str, Any]:
     try:
         logger.info(f"[WeChat] Tier 3 — Browser retry: {url}")
         return await _browser_fetch(url)
+    except WeChatUnavailableError:
+        raise
     except Exception as e:
         logger.error(f"[WeChat] 所有抓取层都失败：{e}")
         raise RuntimeError(

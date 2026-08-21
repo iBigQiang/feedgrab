@@ -20,6 +20,7 @@ Data flow:
 
 import asyncio
 import json
+import random
 import time
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +29,8 @@ from typing import Dict, Any, List, Optional
 
 from feedgrab.config import (
     get_session_dir, mpweixin_id_since, mpweixin_id_delay,
+    mpweixin_id_page_size, mpweixin_id_page_delay, mpweixin_id_page_jitter,
+    mpweixin_id_max_articles, mpweixin_id_freq_retry,
 )
 from feedgrab.utils.dedup import (
     load_index, save_index, has_item, add_item, item_id_from_url,
@@ -41,6 +44,53 @@ MPWEIXIN_SESSION_EXPIRED_MESSAGE = (
 MPWEIXIN_SESSION_MISSING_MESSAGE = (
     f"微信公众号后台登录态文件不存在。请先运行 {MPWEIXIN_LOGIN_COMMAND}。"
 )
+
+# Backoff steps used when MPWEIXIN_ID_FREQ_RETRY is enabled.
+_FREQ_BACKOFF_SECONDS = (60, 300, 900)
+
+# Consecutive captcha pages that abort the run.  Once WeChat starts serving
+# risk-control pages, continuing only burns quota without producing articles.
+_MAX_CONSECUTIVE_CAPTCHA = 5
+
+MPWEIXIN_FREQ_CONTROL_MESSAGE = (
+    "微信后台「查询他人公众号文章列表」触发频率限制（ret=200013 freq control）。\n"
+    "   该限制按请求次数计量，与目标公众号、微信账号、接口版本、count 取值均无关，\n"
+    "   换号 / 换接口 / 改参数都无法绕过；此时登录态本身仍然有效。\n"
+    "   已抓取的内容与分页进度均已保留，解除限制后直接重跑即可续抓。\n"
+    "   建议：\n"
+    "     1) 暂停批量抓取，等待微信解除限制\n"
+    "     2) 调大 MPWEIXIN_ID_PAGE_SIZE（默认 20）减少列表请求次数，\n"
+    "        调大 MPWEIXIN_ID_PAGE_DELAY（默认 8 秒）放慢翻页节奏\n"
+    "     3) 急需新文可临时改用 feedgrab mpweixin-so <公众号名>（搜狗搜索，约 10 条）"
+)
+
+MPWEIXIN_RISK_CONTROL_MESSAGE = (
+    f"连续 {_MAX_CONSECUTIVE_CAPTCHA} 篇文章被微信风控验证页拦截，已中止本轮批量。\n"
+    "   这些文章未保存、也未记入去重索引，稍后重跑可自动补抓。\n"
+    "   建议：暂停一段时间再跑，并调大 MPWEIXIN_ID_DELAY 放慢单篇节奏。"
+)
+
+# Normalized reasons produced by browser.detect_wechat_unavailable().
+_UNAVAILABLE_LABELS = {
+    "deleted": "已被发布者删除",
+    "violation": "因违规无法查看",
+    "privacy": "作者隐私设置限制",
+    "captcha": "微信风控验证页",
+}
+
+
+class MPWeixinFreqControlError(RuntimeError):
+    """Raised when the MP backend rejects a list request with ret=200013."""
+
+    def __init__(self, message: str = MPWEIXIN_FREQ_CONTROL_MESSAGE):
+        super().__init__(message)
+
+
+class MPWeixinRiskControlError(RuntimeError):
+    """Raised when consecutive article pages are replaced by a captcha page."""
+
+    def __init__(self, message: str = MPWEIXIN_RISK_CONTROL_MESSAGE):
+        super().__init__(message)
 
 
 # ---------------------------------------------------------------------------
@@ -159,14 +209,25 @@ async def _fetch_article_list(page, fakeid: str, begin: int = 0,
     data = await page.evaluate(js, {"fakeid": fakeid, "begin": begin, "size": size})
 
     if not data:
-        return [], True, 0
+        raise RuntimeError(
+            "微信后台 appmsgpublish 接口无响应。已抓取内容与进度均已保留，可稍后重试。"
+        )
 
-    ret = data.get("base_resp", {}).get("ret", -1)
+    base_resp = data.get("base_resp", {}) or {}
+    ret = base_resp.get("ret", -1)
+    err_msg = base_resp.get("err_msg", "")
     if ret == 200003:
         raise RuntimeError(MPWEIXIN_SESSION_EXPIRED_MESSAGE)
+    if ret == 200013:
+        # A rate-limited page must never be reported as "list exhausted" — that
+        # is what used to turn a blocked run into "fetched 0 articles, done".
+        logger.error(f"[mpweixin-id] appmsgpublish failed: ret={ret} err_msg={err_msg}")
+        raise MPWeixinFreqControlError()
     if ret != 0:
-        logger.error(f"[mpweixin-id] appmsgpublish failed: ret={ret}")
-        return [], True, 0
+        raise RuntimeError(
+            f"微信后台 appmsgpublish 接口返回错误：ret={ret} "
+            f"err_msg={err_msg or '<empty>'}。已抓取内容与进度均已保留，可稍后重试。"
+        )
 
     publish_page_str = data.get("publish_page", "")
     if not publish_page_str:
@@ -187,6 +248,61 @@ async def _fetch_article_list(page, fakeid: str, begin: int = 0,
 
     is_complete = len(publish_list) == 0
     return articles, is_complete, total
+
+
+async def _fetch_list_with_backoff(page, fakeid: str, begin: int, size: int,
+                                   retries: int = 0) -> tuple:
+    """Fetch one list page, optionally backing off after freq control.
+
+    Defaults to no retry: a freq-control block normally outlasts any wait a
+    single run can afford, so retrying just spends more of the same quota.
+    """
+    attempt = 0
+    while True:
+        try:
+            return await _fetch_article_list(page, fakeid, begin=begin, size=size)
+        except MPWeixinFreqControlError:
+            if attempt >= retries:
+                raise
+            wait = _FREQ_BACKOFF_SECONDS[min(attempt, len(_FREQ_BACKOFF_SECONDS) - 1)]
+            logger.warning(
+                f"[mpweixin-id] >>> 触发频率限制 ret=200013，{wait}s 后重试"
+                f"（第 {attempt + 1}/{retries} 次）<<<"
+            )
+            await asyncio.sleep(wait)
+            attempt += 1
+
+
+def _page_sleep_seconds() -> float:
+    """Delay between list pages, jittered to avoid a perfectly regular cadence."""
+    base = mpweixin_id_page_delay()
+    jitter = mpweixin_id_page_jitter()
+    if base <= 0 or jitter <= 0:
+        return base
+    return max(0.0, base * (1.0 + random.uniform(-jitter, jitter)))
+
+
+def _record_unavailable(reason: str, title: str, link: str, item_id: str,
+                        result: dict, dedup_index: dict,
+                        log_prefix: str = "mpweixin-id") -> None:
+    """Account for a placeholder page without writing an empty article file.
+
+    Risk-control pages stay out of the dedup index so a later run retries them.
+    Content that is genuinely gone (deleted / violation / privacy) is indexed,
+    so later runs stop re-opening the same dead link.
+    """
+    label = _UNAVAILABLE_LABELS.get(reason, reason)
+    if reason == "captcha":
+        result["failed"] += 1
+        logger.warning(
+            f"[{log_prefix}] >>> {label}，未保存也未记入去重索引，稍后重跑可补抓："
+            f"{title[:40]} <<<"
+        )
+        return
+    result["skipped"] += 1
+    if item_id:
+        add_item(item_id, link, dedup_index)
+    logger.info(f"[{log_prefix}] 跳过（{label}）：{title[:40]}")
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +361,9 @@ async def fetch_account_articles(
         "skipped": progress.get("skipped", 0),
         "failed": progress.get("failed", 0),
         "articles": [],
+        # Non-empty when the run stopped early: "freq_control" / "risk_control"
+        # / "max_articles".  Callers must not report an interrupted run as done.
+        "interrupted": "",
     }
 
     async_pw = get_async_playwright()
@@ -256,6 +375,14 @@ async def fetch_account_articles(
         page = await context.new_page()
         await setup_resource_blocking(page)
         date_cutoff_reached = False
+        # A run counts as complete only when the listing was read to the end or
+        # the date cutoff was hit.  Any other exit keeps the progress file, so
+        # the next run resumes instead of silently skipping the remainder.
+        completed = False
+        max_reached = False
+        consecutive_captcha = 0
+        _max_articles = mpweixin_id_max_articles()
+        _freq_retry = mpweixin_id_freq_retry()
 
         try:
             # Navigate to MP backend to establish session context
@@ -284,17 +411,40 @@ async def fetch_account_articles(
 
             # Step 2: Paginate article list
             begin = resume_begin
-            page_size = 5
+            page_size = mpweixin_id_page_size()
+
+            def _record_progress(next_begin: int) -> None:
+                _save_progress(account_name, {
+                    "fakeid": fakeid,
+                    "nickname": nickname,
+                    "next_begin": next_begin,
+                    "fetched": result["fetched"],
+                    "skipped": result["skipped"],
+                    "failed": result["failed"],
+                })
 
             while not date_cutoff_reached:
-                logger.info(f"[mpweixin-id] Fetching articles offset={begin}")
-                articles, is_complete, total = await _fetch_article_list(
-                    page, fakeid, begin=begin, size=page_size,
+                logger.info(
+                    f"[mpweixin-id] Fetching articles offset={begin} count={page_size}"
+                )
+                articles, is_complete, total = await _fetch_list_with_backoff(
+                    page, fakeid, begin=begin, size=page_size, retries=_freq_retry,
                 )
                 result["total"] = total
 
                 if not articles:
-                    break
+                    # Only an empty publish_list means the listing is exhausted.
+                    # A page can carry publish records that yield no appmsgex
+                    # (text-only or channel posts); that is an empty page, not
+                    # the end of the list, and must not clear the progress file.
+                    if is_complete:
+                        completed = True
+                        break
+                    logger.info(f"[mpweixin-id] offset={begin} 无图文消息，翻下一页")
+                    begin += page_size
+                    _record_progress(begin)
+                    await asyncio.sleep(_page_sleep_seconds())
+                    continue
 
                 for art in articles:
                     create_time = art.get("create_time", 0)
@@ -335,87 +485,120 @@ async def fetch_account_articles(
                             art_page, md_converter=_html_to_markdown,
                         )
 
-                        # Fetch comments before closing page
-                        if _fetch_comments and art_data.get("comment_id"):
-                            cmt = await fetch_wechat_comments(
-                                art_page, art_data["comment_id"],
-                                appmsg_token=art_data.get("appmsg_token", ""),
-                                max_comments=_max_comments,
+                        # Deleted / violating / private / risk-control pages come
+                        # back as a placeholder shell.  Saving those is what
+                        # produced the "微信公众平台" empty article files.
+                        reason = art_data.get("unavailable_reason", "")
+                        if reason:
+                            await art_page.close()
+                            _record_unavailable(
+                                reason, title, link, item_id, result, dedup_index,
                             )
-                            if cmt:
-                                art_data["comment_list"] = cmt
+                            consecutive_captcha = (
+                                consecutive_captcha + 1 if reason == "captcha" else 0
+                            )
+                        else:
+                            consecutive_captcha = 0
 
-                        await art_page.close()
-
-                        # Use API metadata as fallback when page extraction misses fields
-                        if not art_data.get("title"):
-                            # API title → digest (for 小绿书 image posts without title)
-                            art_data["title"] = title if title != "untitled" else art.get("digest", "")
-                        if not art_data.get("author"):
-                            art_data["author"] = nickname
-                        if not art_data.get("cover_image"):
-                            art_data["cover_image"] = art.get("cover", "")
-                        if not art_data.get("summary"):
-                            art_data["summary"] = art.get("digest", "")
-
-                        # Save
-                        item = from_wechat(art_data)
-                        item.category = f"account/{nickname}"
-                        saved_path = save_to_markdown(item)
-
-                        # Download media if enabled
-                        if saved_path and (item.extra.get("videos") or item.extra.get("images")):
-                            from feedgrab.config import mpweixin_download_media
-                            if mpweixin_download_media():
-                                from feedgrab.utils.media import download_media
-                                download_media(
-                                    saved_path,
-                                    item.extra.get("images", []),
-                                    item.extra.get("videos", []),
-                                    item.id,
-                                    platform="wechat",
+                            # Fetch comments before closing page
+                            if _fetch_comments and art_data.get("comment_id"):
+                                cmt = await fetch_wechat_comments(
+                                    art_page, art_data["comment_id"],
+                                    appmsg_token=art_data.get("appmsg_token", ""),
+                                    max_comments=_max_comments,
                                 )
+                                if cmt:
+                                    art_data["comment_list"] = cmt
 
-                        # Update dedup index
-                        if item_id:
-                            add_item(item_id, link, dedup_index)
+                            await art_page.close()
 
-                        result["fetched"] += 1
-                        result["articles"].append({
-                            "title": art_data.get("title", ""),
-                            "author": nickname,
-                            "publish_date": art_data.get("publish_date", ""),
-                            "url": link,
-                        })
+                            # Use API metadata as fallback when page extraction misses fields
+                            if not art_data.get("title"):
+                                # API title → digest (for 小绿书 image posts without title)
+                                art_data["title"] = title if title != "untitled" else art.get("digest", "")
+                            if not art_data.get("author"):
+                                art_data["author"] = nickname
+                            if not art_data.get("cover_image"):
+                                art_data["cover_image"] = art.get("cover", "")
+                            if not art_data.get("summary"):
+                                art_data["summary"] = art.get("digest", "")
+
+                            # Save
+                            item = from_wechat(art_data)
+                            item.category = f"account/{nickname}"
+                            saved_path = save_to_markdown(item)
+
+                            # Download media if enabled
+                            if saved_path and (item.extra.get("videos") or item.extra.get("images")):
+                                from feedgrab.config import mpweixin_download_media
+                                if mpweixin_download_media():
+                                    from feedgrab.utils.media import download_media
+                                    download_media(
+                                        saved_path,
+                                        item.extra.get("images", []),
+                                        item.extra.get("videos", []),
+                                        item.id,
+                                        platform="wechat",
+                                    )
+
+                            # Update dedup index
+                            if item_id:
+                                add_item(item_id, link, dedup_index)
+
+                            result["fetched"] += 1
+                            result["articles"].append({
+                                "title": art_data.get("title", ""),
+                                "author": nickname,
+                                "publish_date": art_data.get("publish_date", ""),
+                                "url": link,
+                            })
                     except Exception as e:
                         logger.error(f"[mpweixin-id] Failed: {title[:40]} — {e}")
                         result["failed"] += 1
 
-                    # Save progress after each article
-                    _save_progress(account_name, {
-                        "fakeid": fakeid,
-                        "nickname": nickname,
-                        "next_begin": begin + page_size,
-                        "fetched": result["fetched"],
-                        "skipped": result["skipped"],
-                        "failed": result["failed"],
-                    })
+                    # Progress records the page being processed, not the next
+                    # one: an interruption mid-page must re-read this page (dedup
+                    # skips what was already saved) rather than skip the rest of it.
+                    _record_progress(begin)
+
+                    if consecutive_captcha >= _MAX_CONSECUTIVE_CAPTCHA:
+                        result["interrupted"] = "risk_control"
+                        raise MPWeixinRiskControlError()
+
+                    if _max_articles and result["fetched"] >= _max_articles:
+                        max_reached = True
+                        break
 
                     if delay > 0:
                         await asyncio.sleep(delay)
 
-                if is_complete or date_cutoff_reached:
+                if max_reached:
+                    logger.warning(
+                        f"[mpweixin-id] >>> 已达单次上限 MPWEIXIN_ID_MAX_ARTICLES="
+                        f"{_max_articles}，本轮停止；进度已保存，重跑可继续 <<<"
+                    )
+                    result["interrupted"] = "max_articles"
                     break
 
-                begin += page_size
-                # API rate limit
-                await asyncio.sleep(1)
+                if is_complete or date_cutoff_reached:
+                    completed = True
+                    break
 
+                # Whole page done — only now advance the resume offset.
+                begin += page_size
+                _record_progress(begin)
+                await asyncio.sleep(_page_sleep_seconds())
+
+        except MPWeixinFreqControlError:
+            result["interrupted"] = "freq_control"
+            raise
         finally:
             # Save dedup index
             save_index(dedup_index, "mpweixin")
-            # Clear progress on successful completion
-            if not date_cutoff_reached or result["fetched"] > 0:
+            # Only a run that read the listing to the end (or stopped at the date
+            # cutoff) may drop its progress.  Clearing it after a rate-limited or
+            # aborted run used to strand the remaining articles.
+            if completed:
                 _clear_progress(account_name)
             await context.close()
             await browser.close()

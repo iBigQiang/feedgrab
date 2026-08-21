@@ -256,9 +256,30 @@ UserTweets API 受服务端限制（~800条），通过 Playwright 浏览器按�
 
 `feedgrab mpweixin-id "公众号名"` 通过 MP 后台 API 枚举公众号全部历史文章。需要先 `feedgrab login wechat` 获取 MP 后台 session（有效期约 4 天）。
 
-流程：加载 `sessions/wechat.json` → 导航 `mp.weixin.qq.com` 建立会话 → `searchbiz` API 搜索账号获取 fakeid → `appmsgpublish` API 分页枚举文章列表（每页 5 条）→ 逐篇在新标签页打开 → `evaluate_wechat_article()` + `_html_to_markdown()` 提取全文 → 保存到 `mpweixin/account/{公众号名}/`。
+流程：加载 `sessions/wechat.json` → 导航 `mp.weixin.qq.com` 建立会话 → `searchbiz` API 搜索账号获取 fakeid → `appmsgpublish` API 分页枚举文章列表（每页 20 条，`MPWEIXIN_ID_PAGE_SIZE` 可调）→ 逐篇在新标签页打开 → `evaluate_wechat_article()` + `_html_to_markdown()` 提取全文 → 保存到 `mpweixin/account/{公众号名}/`。
 
-配置项：`MPWEIXIN_ID_SINCE`（日期过滤，YYYY-MM-DD）、`MPWEIXIN_ID_DELAY`（间隔秒数，默认 3）。断点续传：`_progress_mpweixin_id_*.json` 缓存文件，完成后自动清理。去重：复用 `mpweixin` 平台索引。API title fallback：当浏览器 title 为空时（小绿书图片帖），使用 API 返回的 title → digest 作为回退。
+配置项：`MPWEIXIN_ID_SINCE`（日期过滤，YYYY-MM-DD）、`MPWEIXIN_ID_DELAY`（单篇间隔秒数，默认 3）、`MPWEIXIN_ID_PAGE_SIZE`（每页条数，默认 20，上限 20）、`MPWEIXIN_ID_PAGE_DELAY`（翻页间隔秒数，默认 8）、`MPWEIXIN_ID_PAGE_JITTER`（翻页抖动比例，默认 0.4）、`MPWEIXIN_ID_MAX_ARTICLES`（单次上限，默认 0=不限）、`MPWEIXIN_ID_FREQ_RETRY`（200013 退避重试次数，默认 0）。去重：复用 `mpweixin` 平台索引。API title fallback：当浏览器 title 为空时（小绿书图片帖），使用 API 返回的 title → digest 作为回退。
+
+**频率限制（`ret=200013 freq control`）**：MP 后台「查询他人公众号文章列表」按**请求次数**设配额。实测边界——换目标公众号、换微信账号（不同 bizuin/token）、换 `appmsg` 老接口、改 `count`（1/5/20）全部同样被拒；而 searchbiz 搜号、查自己的号、单篇正文抓取均正常，说明登录态本身有效。因此无法绕过，只能压低请求数（调大 `MPWEIXIN_ID_PAGE_SIZE`）+ 放慢节奏（`MPWEIXIN_ID_PAGE_DELAY` + 抖动）。触发时抛 `MPWeixinFreqControlError` 并保留进度，CLI 明确报错且退出码非 0，**不得再打印"抓取完成"**。
+
+**断点续传语义**：进度文件 `_progress_mpweixin_id_*.json` 的 `next_begin` 记录**当前正在处理的页**，整页处理完才推进到下一页——页内中断时重读本页（已存的由 dedup 跳过），不会跳过本页剩余文章。清理条件：仅当 `publish_list` 为空（真正读完）或触发日期截止时才清；限流、风控、异常、达到单次上限一律保留。注意「本页没解出图文消息」（`articles` 为空但 `is_complete=False`）不等于列表读完，需继续翻页。
+
+### 微信文章占位页识别（`browser.py` → `detect_wechat_unavailable`）
+
+微信在文章被删除 / 违规 / 受隐私设置限制 / 触发风控时，返回的是**正文非空的占位页**（标题退化为「微信公众平台」，正文如"该内容已被发布者删除"），因此"内容为空"的检查抓不住它，历史上会被当作文章存成空壳 `.md`。
+
+判定只在缺少 `#js_content` 时进行，要求「标题退化」+「正文命中已知文案」双条件（风控 URL `wappoc_appmsgcaptcha` 单条件即可），归一为 4 种 `unavailable_reason`：`deleted` / `violation` / `privacy` / `captcha`。微信改文案时退化为原行为（按普通页面落盘），不会误杀正常文章。
+
+四条链路统一接入，分流策略不同：
+
+| 链路 | 处理 |
+|------|------|
+| 单篇 `wechat.py` | 抛 `WeChatUnavailableError`，**明确终止不降级 Jina**（否则 Jina 会把同一段占位页文案抓成 Markdown） |
+| 账号批量 `mpweixin_account.py` | `_record_unavailable()` 分流计数 |
+| 专辑批量 `mpweixin_album.py` | 复用 `_record_unavailable(log_prefix=...)` |
+| 搜狗 `wechat_search.py` | 跳过保存（该文件另有一份独立的 fallback 实现，需同步维护） |
+
+分流规则：`deleted` / `violation` / `privacy` → 计 skipped 且**写入 dedup**（内容确实没了，避免反复重试）；`captcha` → 计 failed 且**不写 dedup**（风控是临时的，保持可重试），连续 5 篇风控则中止本轮批量。
 
 ### 微信单篇抓取（`fetchers/wechat.py` + `browser.py`）
 

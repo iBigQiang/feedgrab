@@ -1683,9 +1683,22 @@ def cmd_mpweixin_account(account_name: str):
         result = await fetch_account_articles(
             account_name, since=since, delay=delay,
         )
-        print(f"\n\u2705 微信公众号账号批量抓取完成：'{account_name}'")
+        # An interrupted run must never be reported as a completed one.
+        interrupted = result.get("interrupted", "")
+        interrupt_labels = {
+            "max_articles": "已达单次上限 MPWEIXIN_ID_MAX_ARTICLES",
+            "freq_control": "触发微信频率限制 ret=200013",
+            "risk_control": "触发微信风控验证页",
+        }
+        if interrupted:
+            print(f"\n\u26a0 微信公众号账号批量抓取未完成：'{account_name}'"
+                  f"（{interrupt_labels.get(interrupted, interrupted)}）")
+        else:
+            print(f"\n\u2705 微信公众号账号批量抓取完成：'{account_name}'")
         print(f"   总数：{result['total']}，已抓取：{result['fetched']}，"
               f"已跳过：{result['skipped']}，失败：{result['failed']}")
+        if interrupted:
+            print("   分页进度已保存，稍后重跑可从中断处继续。")
         if result['articles']:
             print("\n   文章：")
             for art in result['articles']:

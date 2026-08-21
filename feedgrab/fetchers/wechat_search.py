@@ -374,6 +374,7 @@ async def _fetch_wechat_article_via_browser(context, wx_url: str) -> Dict[str, A
     """
     from feedgrab.fetchers.browser import (
         WECHAT_ARTICLE_JS_EVALUATE, _build_wechat_result,
+        detect_wechat_unavailable,
     )
 
     new_page = await context.new_page()
@@ -392,7 +393,7 @@ async def _fetch_wechat_article_via_browser(context, wx_url: str) -> Dict[str, A
             # Fallback: grab raw text
             text = await new_page.evaluate("() => document.body.innerText")
             page_title = await new_page.title()
-            return {
+            result = {
                 "title": page_title or "",
                 "content": (text or "").strip(),
                 "author": "",
@@ -403,6 +404,14 @@ async def _fetch_wechat_article_via_browser(context, wx_url: str) -> Dict[str, A
                 "tags": [],
                 "original_url": "",
             }
+            # Same placeholder detection as the main article path, so a deleted
+            # or risk-controlled page is not saved as a "微信公众平台" shell.
+            reason = detect_wechat_unavailable(
+                result["title"], result["content"], new_page.url,
+            )
+            if reason:
+                result["unavailable_reason"] = reason
+            return result
 
         return _build_wechat_result(data, wx_url, md_converter=_html_to_markdown)
     finally:
@@ -634,12 +643,24 @@ async def search_wechat_articles(
             # Fetch full article directly via our browser (rich Markdown)
             try:
                 article_data = await _fetch_wechat_article_via_browser(context, wx_url)
-                _save_article(article_data, item, keyword)
+                reason = article_data.get("unavailable_reason", "")
+                if reason:
+                    # Placeholder page — never save it as an article.  Content
+                    # that is gone for good gets indexed so later runs skip it;
+                    # transient risk control stays out so it can be retried.
+                    from feedgrab.fetchers.wechat import WECHAT_UNAVAILABLE_LABELS
+                    label = WECHAT_UNAVAILABLE_LABELS.get(reason, reason)
+                    logger.warning(f"[mpweixin-so] 跳过（{label}）：{title[:40]}")
+                    if reason != "captcha":
+                        add_item(item_id, wx_url, index)
+                    skipped += 1
+                else:
+                    _save_article(article_data, item, keyword)
 
-                add_item(item_id, wx_url, index)
-                articles.append(item)
-                fetched += 1
-                logger.info(f"[mpweixin-so] 已保存：{title[:50]}")
+                    add_item(item_id, wx_url, index)
+                    articles.append(item)
+                    fetched += 1
+                    logger.info(f"[mpweixin-so] 已保存：{title[:50]}")
             except Exception as e:
                 logger.warning(f"[mpweixin-so] 抓取失败：{title[:40]} — {e}")
                 _save_search_item(item, keyword)
