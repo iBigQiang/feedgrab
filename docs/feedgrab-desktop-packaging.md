@@ -16,15 +16,15 @@
 
 | 项 | 值 |
 |---|---|
-| Release tag | `desktop-v0.1.20-20260830` |
-| 发布页 | <https://github.com/iBigQiang/feedgrab/releases/tag/desktop-v0.1.20-20260830> |
-| 下载地址 | <https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.20-20260830/feedgrab-desktop-setup-0.1.20.exe> |
-| 本地构建目录 | `D:\AiCode\feedgrab\desktop\release-packages\20260830-203522\` |
-| 本地原始文件名 | `feedgrab-desktop-setup-0.1.20.exe` |
-| Release asset 文件名 | `feedgrab-desktop-setup-0.1.20.exe` |
-| 文件大小 | `381036146` bytes |
-| 打包时间 | `2026-08-30 20:36 +08:00` |
-| SHA256 | `248B7847B60823CFDC62623E420D9A55603F868BFE186CEB7C4FD2267036CA30` |
+| Release tag | `desktop-v0.1.21-20260831` |
+| 发布页 | <https://github.com/iBigQiang/feedgrab/releases/tag/desktop-v0.1.21-20260831> |
+| 下载地址 | <https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.21-20260831/feedgrab-desktop-setup-0.1.21.exe> |
+| 本地构建目录 | `D:\AiCode\feedgrab\desktop\release-packages\20260831-020054\` |
+| 本地原始文件名 | `feedgrab-desktop-setup-0.1.21.exe` |
+| Release asset 文件名 | `feedgrab-desktop-setup-0.1.21.exe` |
+| 文件大小 | `381038607` bytes |
+| 打包时间 | `2026-08-31 02:01 +08:00` |
+| SHA256 | `9808237802EFB3668F7E3A1D42826CA0F7782A977B72BC68C672AD3D095CC9CE` |
 | 签名状态 | 未签名 |
 | 在线核验 | GitHub API `browser_download_url` 与上方下载地址一致，`curl.exe -I -L` 最终返回 `200 OK` |
 

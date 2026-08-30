@@ -45,6 +45,17 @@
 
 ### 状态：已完成 ✅（渲染与下载链路已验证；真实网络抓取待登录态恢复后复测）
 
+### 桌面端 0.1.21 发布
+
+本次修复属 CLI 核心层，`main` 与 `feedgrab-desktop` 同受影响，经用户确认后双分支同步：
+
+- `main`：cherry-pick `4c25f8c3` → `7ae2a0f3`。DEVLOG 因两分支顶部条目不同产生冲突，改用 `cherry-pick -n` + `git checkout HEAD -- DEVLOG.md` 复位后手工插入本条目，代码文件全部干净应用；`pytest tests/` 264 passed（main 测试集不含桌面端专有用例）后推送。
+- `feedgrab-desktop`：`desktop/package.json` 递增到 `0.1.21`，`npm run pack:user` 完整三步打包，把修复后的 `reddit.py` 冻结进内置 Python worker。
+- 安装包大小：`381038607` bytes；SHA256：`9808237802EFB3668F7E3A1D42826CA0F7782A977B72BC68C672AD3D095CC9CE`；未签名；打包时间 2026-08-31 02:01 +08:00。
+- GitHub Release：`desktop-v0.1.21-20260831`（target `feedgrab-desktop`，`draft=false`），asset 已上传，`browser_download_url` 经 `curl.exe -I -L` 核验最终 `200 OK`、`Content-Length: 381038607` 与本地逐字节一致。
+- 同步更新 `desktop/README.md`（含新增 `REDDIT_DOWNLOAD_MEDIA` 说明）→ 覆盖根 `README.md`（Compare-Object 无输出）、`README_en.md` 下载入口、`docs/feedgrab-desktop-packaging.md` 发布信息表。
+- **清掉 v0.1.20 的遗留**：v0.1.20 条目中记录的「侧边栏作者/X 关注链接改动只进源码、未进安装包」，本次打包已一并带入，0.1.21 安装包首次包含该改动。
+
 ---
 
 ## 2026-08-30 · 桌面端 v0.1.20 · 侧边栏作者信息文案与主页链接调整
