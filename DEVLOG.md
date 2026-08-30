@@ -2,6 +2,38 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-08-30 · 桌面端 v0.1.20 · 侧边栏作者信息文案与主页链接调整
+
+### 背景
+
+用户反馈客户端左下角作者信息两行文案需要对调并改指向：第一行应展示 X 账号 `@iBigQiang`，第二行「主页」应展示中文品牌名「强子手记」并链接到个人主页 <https://huangqiang.me>，而不是继续指向 X 个人页（下方「推特：X」行已经承担了 X 入口，主页行重复指向 X 属于信息冗余）。
+
+### 实施
+
+- `desktop/renderer/src/App.tsx`（`author-panel`）：作者行 `author-value` 由 `强子手记` 改为 `@iBigQiang`（保持纯文本，无链接）；主页行 `author-text-link` 的 `href` 由 `https://x.com/iBigQiang` 改为 `https://huangqiang.me`，链接文字由 `@iBigQiang` 改为 `强子手记`。
+- 「仓库：GitHub」「推特：X」两行不动，仍分别指向 `feedgrab-desktop` 分支与 X 主页。
+- `desktop/tests/App.test.tsx`：同步两处断言——`作者：@iBigQiang` 行文本 + `强子手记` 链接 href 指向 `https://huangqiang.me`；`author-row` 全量文本快照更新为 `["作者：@iBigQiang", "主页：强子手记", "仓库：GitHub", "推特：X"]`。
+- 外链无需改主进程：`electron/main.ts` 的 `setWindowOpenHandler` 对任意 `https://` 统一放行到系统浏览器，`huangqiang.me` 自动生效。
+- `desktop/package.json` 版本递增到 `0.1.20`；本次 `npm install` 顺带把落后的 `package-lock.json`（仍停在 `0.1.14`）同步到 `0.1.20`。
+
+### 验证结果
+
+- `npm test` 83 passed（5 个测试文件）；`npm run lint` 通过（`--max-warnings=0`）；`npm run build` 通过（typecheck + vite build + electron tsc）。
+- `python -m pytest tests/test_service_desktop.py tests/test_worker_protocol.py tests/test_service_layer.py -q` → 106 passed（本次未改 service/worker 协议，作为回归交叉验证）。
+- 注：打包前发现本地 `desktop/node_modules` 残缺（`vitest` 缺失、`.bin` 为空），执行 `npm install` 补齐 376 个包后测试链路恢复。
+
+### 桌面端 0.1.20 发布
+
+- `npm run pack:user` 完整三步打包（build → runtime:build → package-windows.ps1）退出码 0，产物 `feedgrab-desktop-setup-0.1.20.exe`。
+- 安装包大小：`381036146` bytes；SHA256：`248B7847B60823CFDC62623E420D9A55603F868BFE186CEB7C4FD2267036CA30`；未签名；打包时间 2026-08-30 20:36 +08:00。
+- GitHub Release：`desktop-v0.1.20-20260830`（target `feedgrab-desktop`，`draft=false`），asset 已上传，`browser_download_url` 经 `curl.exe -I -L` 核验最终 `200 OK`、`Content-Length: 381036146` 与本地文件逐字节一致。
+- 同步更新 `desktop/README.md` → 覆盖根 `README.md`（Compare-Object 无输出）、`README_en.md` 下载入口、`docs/feedgrab-desktop-packaging.md` 发布信息表。
+- v0.1.19 用户可直接在客户端左下角点击「更新」升级到本版本（自动更新自 0.1.19 起可用）。
+
+### 状态：已完成 ✅
+
+---
+
 ## 2026-08-21 · v0.26.6-dev · 微信公众号 200013 限流不再谎报成功 + 占位页落盘修复
 
 ### 背景
