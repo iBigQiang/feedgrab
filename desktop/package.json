@@ -1,6 +1,6 @@
 {
   "name": "feedgrab-desktop",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "description": "Commercial desktop GUI client for feedgrab.",
   "author": "iBigQiang",
   "private": true,

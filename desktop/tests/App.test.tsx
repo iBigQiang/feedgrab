@@ -38,8 +38,8 @@ describe("App", () => {
     expect(screen.getByText("社群")).toBeInTheDocument();
     expect(screen.queryByText("授权")).not.toBeInTheDocument();
     expect(screen.getByText(/版本：v0\.1\.\d+/)).toBeInTheDocument();
-    expect(screen.getByText("强子手记").closest(".author-row")).toHaveTextContent("作者：强子手记");
-    expect(screen.getByRole("link", { name: "@iBigQiang" })).toHaveAttribute("href", "https://x.com/iBigQiang");
+    expect(screen.getByText("@iBigQiang").closest(".author-row")).toHaveTextContent("作者：@iBigQiang");
+    expect(screen.getByRole("link", { name: "强子手记" })).toHaveAttribute("href", "https://huangqiang.me");
     expect(screen.queryByText("商业化 GUI 客户端分支")).not.toBeInTheDocument();
     expect(screen.getByText("现已支持的平台：")).toBeInTheDocument();
     expect(screen.getByText("YouTube")).toBeInTheDocument();
@@ -77,8 +77,8 @@ describe("App", () => {
 
     const rows = Array.from(container.querySelectorAll(".author-row"));
     expect(rows.map((row) => row.textContent?.replace(/\s+/g, ""))).toEqual([
-      "作者：强子手记",
-      "主页：@iBigQiang",
+      "作者：@iBigQiang",
+      "主页：强子手记",
       "仓库：GitHub",
       "推特：X"
     ]);

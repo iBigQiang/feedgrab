@@ -675,12 +675,12 @@ export function App(): ReactElement {
           <div className="author-panel">
             <div className="author-row">
               <span className="author-label">作者：</span>
-              <span className="author-value">强子手记</span>
+              <span className="author-value">@iBigQiang</span>
             </div>
             <div className="author-row">
               <span className="author-label">主页：</span>
-              <a className="author-text-link" href="https://x.com/iBigQiang" target="_blank" rel="noreferrer">
-                @iBigQiang
+              <a className="author-text-link" href="https://huangqiang.me" target="_blank" rel="noreferrer">
+                强子手记
               </a>
             </div>
             <div className="author-row">
