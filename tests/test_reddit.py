@@ -595,3 +595,145 @@ def test_login_reddit_force_interactive_skips_existing_cdp_cookie_extract(monkey
     login_mod.login("reddit")
 
     assert calls == {"extract": 0, "interactive": 1}
+
+
+# ---------------------------------------------------------------------------
+# Inline image rendering (Obsidian preview) + media download wiring
+# ---------------------------------------------------------------------------
+
+def test_is_image_url_matches_signed_reddit_previews_and_rejects_transcoded_video():
+    assert reddit._is_image_url(
+        "https://preview.redd.it/y9fx2ebsj2mh1.jpeg?width=1024&format=pjpg&auto=webp&s=3af3e03c"
+    )
+    assert reddit._is_image_url("https://i.redd.it/abc123.png")
+    assert reddit._is_image_url("https://i.imgur.com/abc.WEBP")
+    # Reddit keeps the .gif suffix while transcoding to video — embedding breaks.
+    assert not reddit._is_image_url("https://preview.redd.it/abc.gif?format=mp4&s=deadbeef")
+    assert not reddit._is_image_url("https://www.reddit.com/r/ChatGPT/comments/abc/title/")
+    assert not reddit._is_image_url("")
+    assert not reddit._is_image_url("ftp://example.com/a.jpg")
+
+
+def test_strip_html_embeds_bare_image_links_and_keeps_plain_links():
+    html = (
+        '<div class="md"><p>'
+        '<a href="https://preview.redd.it/y9fx.jpeg?width=1024&amp;s=3af3">'
+        'https://preview.redd.it/y9fx.jpeg?width=1024&amp;s=3af3</a>'
+        '</p><p><a href="https://example.com/article">read this</a></p>'
+        '<p><a href="https://i.redd.it/two.png">my second chart</a></p></div>'
+    )
+
+    out = reddit._strip_html(html)
+
+    # Bare image URL → image syntax with empty alt (label carried no info).
+    assert "![](https://preview.redd.it/y9fx.jpeg?width=1024&s=3af3)" in out
+    # Described image link → image syntax keeping the description as alt.
+    assert "![my second chart](https://i.redd.it/two.png)" in out
+    # Non-image link stays a link.
+    assert "[read this](https://example.com/article)" in out
+    assert "![read this]" not in out
+
+
+def test_collect_markdown_image_urls_dedupes_and_ignores_plain_links():
+    md = (
+        "![](https://i.redd.it/a.png)\n"
+        "[not an image](https://example.com/x)\n"
+        "![alt text](https://i.redd.it/b.jpg)\n"
+        "![](https://i.redd.it/a.png)\n"
+    )
+
+    assert reddit._collect_markdown_image_urls(md) == [
+        "https://i.redd.it/a.png",
+        "https://i.redd.it/b.jpg",
+    ]
+
+
+def test_render_post_embeds_comment_images_and_collects_them_for_download():
+    post = {
+        "id": "abc",
+        "title": "Prompts",
+        "subreddit": "ChatGPT",
+        "author": "alice",
+        "permalink": "/r/ChatGPT/comments/abc/prompts/",
+        "is_self": True,
+    }
+    comments = [
+        {
+            "author": "bob",
+            "score": 19,
+            "body_html": (
+                '<div class="md"><p><a href="https://preview.redd.it/one.jpeg?s=sig">'
+                'https://preview.redd.it/one.jpeg?s=sig</a></p></div>'
+            ),
+        }
+    ]
+
+    result = reddit._render_post(post, comments)
+
+    assert "![](https://preview.redd.it/one.jpeg?s=sig)" in result["content"]
+    # Comment images must reach the result so reader.py can download them.
+    assert "https://preview.redd.it/one.jpeg?s=sig" in result["images"]
+
+
+def test_render_media_lines_embeds_images_but_leaves_video_urls_plain():
+    lines = reddit._render_media_lines(
+        {
+            "post_hint": "image",
+            "media_url": "https://v.redd.it/xyz",
+            "preview_image_url": "https://preview.redd.it/p.jpg?s=sig",
+            "gallery_urls": ["https://gallery.example/one.jpg"],
+        }
+    )
+
+    assert "- 类型：image" in lines
+    assert "- 原始媒体：https://v.redd.it/xyz" in lines
+    assert "- 预览图：![](https://preview.redd.it/p.jpg?s=sig)" in lines
+    assert "- 图集 1：![](https://gallery.example/one.jpg)" in lines
+
+
+def test_reddit_download_media_defaults_off_and_reads_env(monkeypatch):
+    from feedgrab.config import reddit_download_media
+
+    monkeypatch.delenv("REDDIT_DOWNLOAD_MEDIA", raising=False)
+    assert reddit_download_media() is False
+
+    monkeypatch.setenv("REDDIT_DOWNLOAD_MEDIA", "true")
+    assert reddit_download_media() is True
+
+
+def test_media_filename_extraction_handles_signed_reddit_url():
+    from feedgrab.utils.media import _extract_filename
+
+    name = _extract_filename(
+        "https://preview.redd.it/y9fx2ebsj2mh1.jpeg?width=1024&format=pjpg&s=3af3",
+        "reddit",
+    )
+
+    assert name == "y9fx2ebsj2mh1.jpeg"
+
+
+def test_strip_html_normalizes_url_escaping_across_reddit_domains():
+    """old.reddit escapes body_html once, www.reddit twice — both must yield clean URLs."""
+    # old.reddit.com form: entities survive one document-level unescape as &amp;
+    old_form = (
+        '<div class="md"><p><a href="https://preview.redd.it/a.jpeg?w=1&amp;s=sig">'
+        'https://preview.redd.it/a.jpeg?w=1&amp;s=sig</a></p></div>'
+    )
+    # www.reddit.com form: doubly escaped, so one pass still leaves &amp;
+    www_form = (
+        '<div class="md"><p><a href="https://preview.redd.it/a.jpeg?w=1&amp;amp;s=sig">'
+        'https://preview.redd.it/a.jpeg?w=1&amp;amp;s=sig</a></p></div>'
+    )
+
+    for html_form in (old_form, www_form):
+        out = reddit._strip_html(html_form)
+        assert "![](https://preview.redd.it/a.jpeg?w=1&s=sig)" in out
+        assert "&amp;" not in out
+
+
+def test_strip_html_unescapes_href_for_plain_links_too():
+    out = reddit._strip_html(
+        '<div class="md"><p><a href="https://example.com/s?a=1&amp;amp;b=2">docs</a></p></div>'
+    )
+
+    assert "[docs](https://example.com/s?a=1&b=2)" in out

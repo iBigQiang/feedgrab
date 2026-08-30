@@ -943,6 +943,49 @@ def _format_unix_display(ts: float) -> str:
     return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
 
 
+_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".avif")
+
+
+def _is_image_url(url: str) -> bool:
+    """Whether a URL points at an image we can safely embed as ![](url).
+
+    Judged by the path extension after stripping the query string, so signed
+    Reddit URLs like preview.redd.it/x.jpeg?width=1024&s=... still match.
+    Reddit transcodes gifs to mp4 while keeping the .gif suffix, so anything
+    asking for a video format is excluded — embedding it would render broken.
+    """
+    if not url:
+        return False
+    clean = url.strip()
+    if not clean.lower().startswith(("http://", "https://")):
+        return False
+    parsed = urlparse(clean)
+    path = (parsed.path or "").lower().rstrip("/")
+    if not path.endswith(_IMAGE_EXTENSIONS):
+        return False
+    query = (parsed.query or "").lower()
+    if "format=mp4" in query or "format=webm" in query:
+        return False
+    return True
+
+
+def _collect_markdown_image_urls(markdown: str) -> list[str]:
+    """Collect remote URLs already embedded as ![](url) in rendered Markdown.
+
+    Downloading is driven by what the body actually embeds: utils.media
+    rewrites URLs by exact string match, so sourcing both from the same
+    rendered text keeps download and rewrite in lockstep.
+    """
+    if not markdown:
+        return []
+    urls: list[str] = []
+    for match in re.finditer(r"!\[[^\]]*\]\((https?://[^)\s]+)\)", markdown):
+        url = match.group(1)
+        if url not in urls:
+            urls.append(url)
+    return urls
+
+
 def _strip_html(html: str) -> str:
     """Lightweight HTML → Markdown for Reddit body_html / selftext_html."""
     if not html:
@@ -961,7 +1004,7 @@ def _strip_html(html: str) -> str:
     text = re.sub(r"<pre>(.*?)</pre>", r"\n```\n\1\n```\n", text, flags=re.IGNORECASE | re.DOTALL)
     text = re.sub(
         r'<a\s+href="([^"]+)"[^>]*>(.*?)</a>',
-        r"[\2](\1)",
+        _anchor_to_markdown,
         text,
         flags=re.IGNORECASE | re.DOTALL,
     )
@@ -969,6 +1012,29 @@ def _strip_html(html: str) -> str:
     text = re.sub(r"<[^>]+>", "", text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text
+
+
+def _anchor_to_markdown(match: "re.Match[str]") -> str:
+    """Render an <a> as an image when it points at one, else as a link.
+
+    Reddit turns bare image URLs pasted into comments into <a> tags, so the
+    generic link rule used to flatten every inline image into a plain link
+    that Obsidian renders as text rather than a picture.
+
+    The href gets one more unescape pass because old.reddit.com and
+    www.reddit.com disagree on escaping depth: old returns body_html escaped
+    once (&amp; in the URL), www returns it twice (&amp;amp;). One pass at the
+    document level therefore leaves www URLs carrying a literal "&amp;".
+    Unescaping the href alone is idempotent for the already-clean old.reddit
+    form, and URLs have no business holding HTML entities either way.
+    """
+    href = html_lib.unescape(match.group(1))
+    label = match.group(2)
+    if not _is_image_url(href):
+        return f"[{label}]({href})"
+    # Bare-URL links carry no information in the label; keep alt empty.
+    alt = "" if html_lib.unescape(label).strip() == href.strip() else label.strip()
+    return f"![{alt}]({href})"
 
 
 def _render_post(post: Dict[str, Any], comments: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -1043,6 +1109,14 @@ def _render_post(post: Dict[str, Any], comments: List[Dict[str, Any]]) -> Dict[s
 
     content = "\n".join(body_parts).rstrip() + "\n"
 
+    # Images embedded in the body (comments included) drive media download:
+    # utils.media rewrites by exact string match, so both must come from the
+    # same rendered text or download and rewrite fall out of sync.
+    images = list(media.get("images", []))
+    for url in _collect_markdown_image_urls(content):
+        if url not in images:
+            images.append(url)
+
     return {
         "id": post.get("id", ""),
         "title": title,
@@ -1064,7 +1138,7 @@ def _render_post(post: Dict[str, Any], comments: List[Dict[str, Any]]) -> Dict[s
         "preview_image_url": media.get("preview_image_url", ""),
         "gallery_urls": media.get("gallery_urls", []),
         "media_url": media.get("media_url", ""),
-        "images": media.get("images", []),
+        "images": images,
         "videos": media.get("videos", []),
     }
 
@@ -1141,12 +1215,17 @@ def _render_media_lines(media: dict[str, Any]) -> list[str]:
     if post_hint:
         lines.append(f"- 类型：{post_hint}")
     if media.get("media_url"):
-        lines.append(f"- 原始媒体：{media['media_url']}")
+        lines.append(f"- 原始媒体：{_media_value(media['media_url'])}")
     if media.get("preview_image_url"):
-        lines.append(f"- 预览图：{media['preview_image_url']}")
+        lines.append(f"- 预览图：{_media_value(media['preview_image_url'])}")
     for idx, url in enumerate(media.get("gallery_urls") or [], 1):
-        lines.append(f"- 图集 {idx}：{url}")
+        lines.append(f"- 图集 {idx}：{_media_value(url)}")
     return lines
+
+
+def _media_value(url: str) -> str:
+    """Embed images inline so Obsidian previews them; leave other media as URLs."""
+    return f"![]({url})" if _is_image_url(url) else str(url)
 
 
 def _expand_morechildren(

@@ -2,6 +2,51 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-08-31 · Reddit 图片在 Obsidian 不渲染修复 + REDDIT_DOWNLOAD_MEDIA
+
+### 背景
+
+用户用桌面客户端抓 `r/ChatGPT` 的 30 prompts 帖，产出 md 在 Obsidian 预览模式下图片不显示，仍是链接；而图片地址在浏览器可正常打开。
+
+### 根因
+
+**直接原因**：产物里是链接语法 `[url](url)` 而非图片语法 `![](url)`，Obsidian 只对后者渲染图片。与图片地址可用性无关。
+
+**代码根因**：`reddit.py → _strip_html()` 的 `<a>` 转换正则 `r"[\2](\1)"` **无条件**把所有锚点降级为链接。Reddit 把评论里粘贴的裸图片 URL 渲染成 `<a href="...">...</a>` 放进 `body_html`，于是内联图片一律被拍平成普通链接。
+
+**佐证**：`grep '!\[' reddit.py` 无任何匹配，而 github/youdao/weibo/kdocs/twitter/flowus/feishu 等 8 个 fetcher 均生成图片语法——Reddit 是唯一未做图片内嵌的平台，属功能缺口而非回归。
+
+**附带缺口**：`_render_media_lines()` 的预览图/图集/原始媒体均为纯文本 URL；`_extract_media_fields()` 只收集主帖 preview+gallery，**不含评论图片**（本案 18 张图全在评论里，原 `images` 为空）。
+
+### 实测前提
+
+`preview.redd.it` 无防盗链：无 Referer、非浏览器 UA、Obsidian 风格 Electron UA 三种请求均返回 `200 image/jpeg`。故默认内嵌在线地址即可预览。`utils/media.py` 对 Reddit 开箱即用无需修改：generic fallback 提取文件名正确（`urlparse` 已剥离 query），未知 platform 不改写签名 URL、不加 Referer——恰好符合 Reddit 需求。
+
+### 实施
+
+- **`_is_image_url()`**：去 query 后按扩展名判定（jpg/jpeg/png/gif/webp/bmp/svg/avif）。Reddit 把 gif 转码为 mp4 却保留 `.gif` 后缀，故 `format=mp4|webm` 显式排除，避免内嵌破图。
+- **`_anchor_to_markdown()`** 替换原模板替换：图片 → `![alt](url)`（裸链接 alt 留空，有描述文字则保留），非图片仍为 `[text](url)`。
+- **转义层数归一**：实测 `old.reddit.com` 的 `body_html` 单层转义、`www.reddit.com` 双层（`&amp;amp;`），文档级只 unescape 一次会让 www 来源的 URL 残留字面量 `&amp;`。故对 href 单独再 unescape 一次——对已干净的 old 形态幂等，URL 本就不该含 HTML 实体。
+- **`_collect_markdown_image_urls()`**：从**已渲染正文**回收 `![](url)` 合并进 `images`。关键设计：`utils.media._replace_urls_in_md()` 靠字符串精确匹配改写，只有"正文内嵌什么就下载什么"才能保证下载与改写不脱节，单一数据源无需维护两条链路一致性。
+- **`_render_media_lines()`**：经 `_media_value()` 判定后图片输出 `- 预览图：![](url)`，保留元信息标签同时可预览；视频等非图片保持纯 URL。
+- **`config.reddit_download_media()`** + **`reader.py` REDDIT 分支** + `.env.example`：默认 false 在线内嵌，`REDDIT_DOWNLOAD_MEDIA=true` 下载到 `attachments/{item_id}/`，与 X/XHS/WeChat/Weibo 既定模式一致。
+
+### 验证结果
+
+- `pytest tests/` **390 passed**（新增 9 个用例：图片 URL 判定含 mp4 转码排除、裸/描述链接分流、非图片链接不误转、两种转义层数归一、评论图片回收、媒体行内嵌、开关默认值、Reddit 文件名提取）。
+- **真实数据端到端**：Reddit 已收紧游客访问（`old.reddit.com` 的 `.json` 302 到 `/login/?reason=lor2`，`www` 侧 403），本地 `sessions/reddit.json` 仅 6 个 cookie 且缺 `reddit_session`，故 CLI 直抓全 Tier 失败。改用浏览器同源 `fetch` 取到真实 payload（200 / 259KB），喂给**真实渲染链路** `_extract_post_data → _extract_comments → _render_post → from_reddit → save_to_markdown`：产出 md 中 18 张图全部 `![](...)`、`&amp;` 计数为 0、非图片链接 `[Gemini poster](...)` 未被误转。
+- **下载开关**：`download_media(..., platform="reddit")` 实测 18/18 全部落 `attachments/`，md 中 18 处改写为相对路径，文件名 `y9fx2ebsj2mh1.jpeg` 干净。
+- **视觉**：渲染在线内嵌版本，6/6 图片 `naturalWidth > 0` 无破图，截图确认正常显示。
+
+### 已知遗留
+
+- 抓取网络层当前受 Reddit 游客限制阻断，与本次改动无关；用户需 `feedgrab login reddit` 重建含 `reddit_session` 的登录态后才能重抓。
+- 存量 md 不回改（用户明确选择）：已存文档中的图片仍是链接语法，需重抓才会变为内嵌。
+
+### 状态：已完成 ✅（渲染与下载链路已验证；真实网络抓取待登录态恢复后复测）
+
+---
+
 ## 2026-08-30 · 桌面端 v0.1.20 · 侧边栏作者信息文案与主页链接调整
 
 ### 背景

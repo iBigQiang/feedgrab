@@ -372,6 +372,21 @@ class UniversalReader:
                         platform="weibo",
                     )
 
+            # Reddit: download post/comment images to attachments/{item_id}/
+            if (saved_path
+                    and content.source_type == SourceType.REDDIT
+                    and (content.extra.get("images") or content.extra.get("videos"))):
+                from feedgrab.config import reddit_download_media
+                if reddit_download_media():
+                    from feedgrab.utils.media import download_media
+                    download_media(
+                        saved_path,
+                        content.extra.get("images", []),
+                        content.extra.get("videos", []),
+                        content.id,
+                        platform="reddit",
+                    )
+
             # Register in global dedup index (single fetch: always save, never skip)
             try:
                 from feedgrab.utils.dedup import load_index, save_index, add_item

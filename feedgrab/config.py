@@ -1304,6 +1304,16 @@ def mpweixin_download_media() -> bool:
     return os.getenv("MPWEIXIN_DOWNLOAD_MEDIA", "false").lower() in ("true", "1", "yes")
 
 
+def reddit_download_media() -> bool:
+    """Download Reddit post/comment images to local attachments directory.
+
+    Default false: preview.redd.it serves signed URLs without hotlink
+    protection, so embedded images render fine online. Set true to keep a
+    local copy that survives any future signature expiry.
+    """
+    return os.getenv("REDDIT_DOWNLOAD_MEDIA", "false").lower() in ("true", "1", "yes")
+
+
 # ── Chrome CDP ───────────────────────────────────────────────
 
 def chrome_cdp_login() -> bool:
