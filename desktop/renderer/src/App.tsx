@@ -33,6 +33,7 @@ const documentBaseUrl = "https://github.com/iBigQiang/feedgrab/tree/feedgrab-des
 const documentRawBaseUrl = "https://raw.githubusercontent.com/iBigQiang/feedgrab/feedgrab-desktop/docs/";
 const proxiedDocumentRawBaseUrl = "https://edgeone.gh-proxy.com/https://raw.githubusercontent.com/iBigQiang/feedgrab/feedgrab-desktop/docs/";
 const markdownCacheTtlMs = 6 * 60 * 60 * 1000;
+const xFollowUrl = "https://x.com/intent/follow?screen_name=iBigQiang";
 const desktopVersion = typeof desktopPackage.version === "string" ? desktopPackage.version : "";
 
 const sponsorMarkdownConfig: RemoteMarkdownConfig = {
@@ -675,7 +676,9 @@ export function App(): ReactElement {
           <div className="author-panel">
             <div className="author-row">
               <span className="author-label">作者：</span>
-              <span className="author-value">@iBigQiang</span>
+              <a className="author-text-link" href={xFollowUrl} target="_blank" rel="noreferrer">
+                @iBigQiang
+              </a>
             </div>
             <div className="author-row">
               <span className="author-label">主页：</span>
@@ -703,12 +706,14 @@ export function App(): ReactElement {
             <div className="author-row">
               <span className="author-label">推特：</span>
               <span className="author-value author-social-value">
-                <a className="author-icon-link" href="https://x.com/iBigQiang" target="_blank" rel="noreferrer" aria-label="推特">
+                <a className="author-icon-link" href={xFollowUrl} target="_blank" rel="noreferrer" aria-label="推特">
                   <span aria-hidden="true" className="author-link-icon">
                     <SidebarIcon name="x" />
                   </span>
                 </a>
-                <span>X</span>
+                <a className="author-text-link" href={xFollowUrl} target="_blank" rel="noreferrer">
+                  X
+                </a>
               </span>
             </div>
           </div>

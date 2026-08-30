@@ -30,7 +30,22 @@
 - 同步更新 `desktop/README.md` → 覆盖根 `README.md`（Compare-Object 无输出）、`README_en.md` 下载入口、`docs/feedgrab-desktop-packaging.md` 发布信息表。
 - v0.1.19 用户可直接在客户端左下角点击「更新」升级到本版本（自动更新自 0.1.19 起可用）。
 
-### 状态：已完成 ✅
+### 追加（发布后源码级改动，未重新打包）
+
+用户要求把两处 X 入口统一改为「关注意图链接」，方便访客一键跳到关注确认页：
+
+- `App.tsx` 新增模块级常量 `xFollowUrl = "https://x.com/intent/follow?screen_name=iBigQiang"`，三处引用同一常量避免地址分散。
+- 作者行 `@iBigQiang` 由纯文本 `author-value` 改为 `author-text-link` 链接，指向 `xFollowUrl`。
+- 推特行**图标与「X」文字都成为链接**：图标 `author-icon-link` 的 href 由 `https://x.com/iBigQiang` 改为 `xFollowUrl`；原纯文本 `<span>X</span>` 改为 `author-text-link` 链接同址。
+- 「仓库：GitHub」行保持原样（仅图标可点，文字不可点）。
+- 视觉零变化的依据：`styles.css` 中 `.author-value` 与 `.author-text-link` 共用同一组 `color: #f6f0e4/ font-size: 13px / font-weight: 400 / text-decoration: none`，改成链接只额外获得与主页行一致的 hover 金色 `#f0cf80`。
+- 测试同步 4 处断言（`App.test.tsx` 共 3 个用例受影响）：作者链接 href、推特图标 href、新增「X」文字链接 href、赞助页用例中的 `xLink` href；原「只有社交图标可点」的用例名与 `getByText("X").closest("a")).toBeNull()` 断言按新语义改写，GitHub 行的同类断言保留。
+
+验证：`npm test` 83 passed、`npm run lint` 通过、`npm run build` 通过；另用 Vite dev server + Playwright 真实渲染核验，快照确认三个 `/url` 均为 `xFollowUrl`，截图与改动前视觉一致。
+
+> ⚠️ **本节改动只推送源码，未重新打包**：已发布的 `desktop-v0.1.20-20260830` 安装包（SHA256 `248B7847...`）仍是不含本节改动的版本，用户下载安装后左下角作者行与「X」文字仍不可点击。这两处链接会随下一次递增版本号的打包（v0.1.21+）进入安装包。
+
+### 状态：已完成 ✅（安装包待下次打包时携带追加改动）
 
 ---
 

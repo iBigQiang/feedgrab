@@ -39,6 +39,10 @@ describe("App", () => {
     expect(screen.queryByText("授权")).not.toBeInTheDocument();
     expect(screen.getByText(/版本：v0\.1\.\d+/)).toBeInTheDocument();
     expect(screen.getByText("@iBigQiang").closest(".author-row")).toHaveTextContent("作者：@iBigQiang");
+    expect(screen.getByRole("link", { name: "@iBigQiang" })).toHaveAttribute(
+      "href",
+      "https://x.com/intent/follow?screen_name=iBigQiang"
+    );
     expect(screen.getByRole("link", { name: "强子手记" })).toHaveAttribute("href", "https://huangqiang.me");
     expect(screen.queryByText("商业化 GUI 客户端分支")).not.toBeInTheDocument();
     expect(screen.getByText("现已支持的平台：")).toBeInTheDocument();
@@ -72,7 +76,7 @@ describe("App", () => {
     expect(await screen.findByText("1.md")).toBeInTheDocument();
   });
 
-  it("keeps sidebar author rows visually consistent and links only the social icons", () => {
+  it("keeps sidebar author rows visually consistent and points both X entries at the follow intent", () => {
     const { container } = render(<App />);
 
     const rows = Array.from(container.querySelectorAll(".author-row"));
@@ -87,12 +91,14 @@ describe("App", () => {
 
     const twitterRow = screen.getByText("推特：").closest(".author-row") as HTMLElement;
     const githubRow = screen.getByText("仓库：").closest(".author-row") as HTMLElement;
-    expect(within(twitterRow).getByRole("link", { name: "推特" })).toHaveAttribute("href", "https://x.com/iBigQiang");
+    const followUrl = "https://x.com/intent/follow?screen_name=iBigQiang";
+
+    expect(within(twitterRow).getByRole("link", { name: "推特" })).toHaveAttribute("href", followUrl);
+    expect(within(twitterRow).getByRole("link", { name: "X" })).toHaveAttribute("href", followUrl);
     expect(within(githubRow).getByRole("link", { name: "仓库" })).toHaveAttribute(
       "href",
       "https://github.com/iBigQiang/feedgrab/tree/feedgrab-desktop"
     );
-    expect(within(twitterRow).getByText("X").closest("a")).toBeNull();
     expect(within(githubRow).getByText("GitHub").closest("a")).toBeNull();
   });
 
@@ -359,7 +365,7 @@ describe("App", () => {
 
     const xLink = screen.getByRole("link", { name: "推特" });
     const githubLink = screen.getByRole("link", { name: "仓库" });
-    expect(xLink).toHaveAttribute("href", "https://x.com/iBigQiang");
+    expect(xLink).toHaveAttribute("href", "https://x.com/intent/follow?screen_name=iBigQiang");
     expect(githubLink).toHaveAttribute("href", "https://github.com/iBigQiang/feedgrab/tree/feedgrab-desktop");
 
     fireEvent.click(screen.getByRole("button", { name: "赞助" }));
