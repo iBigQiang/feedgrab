@@ -2,6 +2,24 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-08-07 · v0.27.0 · Reddit 结构化抓取结果
+
+### 改动
+
+- Reddit 单帖结果在兼容原有 `content` Markdown 的同时，新增独立的帖子正文 `body`、标准化评论数组 `comments` 和抓取状态 `fetch_status`。
+- 新增 `fetch_reddit_structured()` 与 `fetch_reddit_subreddit_structured()` 公共入口；原有函数保持不变并委托给结构化实现。
+- Jina 兜底结果使用 `fetch_status=jina_fallback`，并明确返回空评论数组，方便调用方区分数据完整度。
+
+### 验证
+
+- 新增测试分别确认结构化主路径的 2 个预期失败和 Jina 兜底的 1 个预期失败；实现后 Reddit / service 目标测试为 `35 passed`。
+- 排除上游 5 个已知夹具/目录问题后的全量测试为 `252 passed, 5 deselected`；直接全量测试仅保留相同的 5 个基线失败。
+- 使用 SOCKS5 代理实测目标 Reddit 帖子：浏览器兜底成功返回 `fetch_status=ok`、796 字符独立正文和 26 条结构化评论。
+
+### 状态：已完成 ✅
+
+---
+
 ## 2026-07-03 · v0.26.0 · main CLI 对齐桌面端 0.1.14 后端能力
 
 ### 背景

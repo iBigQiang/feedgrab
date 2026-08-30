@@ -971,7 +971,25 @@ def _strip_html(html: str) -> str:
     return text
 
 
-def _render_post(post: Dict[str, Any], comments: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _format_comment(comment: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize one Reddit comment into a stable public shape."""
+    c_html = comment.get("body_html") or ""
+    body = _strip_html(c_html) if c_html else (comment.get("body") or "")
+    return {
+        "id": comment.get("id", ""),
+        "author": comment.get("author", "[deleted]") or "[deleted]",
+        "body": body,
+        "score": comment.get("score", 0),
+        "created_at": _format_unix_iso(comment.get("created_utc") or comment.get("created") or 0),
+        "permalink": comment.get("permalink", "") or "",
+    }
+
+
+def _render_post(
+    post: Dict[str, Any],
+    comments: List[Dict[str, Any]],
+    fetch_status: str = "ok",
+) -> Dict[str, Any]:
     """Render a Reddit post + top-level comments into the result dict."""
     title = (post.get("title") or "").strip() or "Untitled"
     author = post.get("author", "[deleted]") or "[deleted]"
@@ -1042,11 +1060,17 @@ def _render_post(post: Dict[str, Any], comments: List[Dict[str, Any]]) -> Dict[s
             body_parts.append("")
 
     content = "\n".join(body_parts).rstrip() + "\n"
+    structured_comments = [
+        item for item in (_format_comment(comment) for comment in comments) if item.get("body")
+    ]
 
     return {
         "id": post.get("id", ""),
         "title": title,
         "content": content,
+        "body": body_md,
+        "comments": structured_comments,
+        "fetch_status": fetch_status,
         "url": permalink or post.get("url", ""),
         "author": author,
         "author_name": author,
@@ -1489,8 +1513,8 @@ def _search_category(keyword: str) -> str:
 # Public API
 # =============================================================================
 
-async def fetch_reddit(url: str) -> Dict[str, Any]:
-    """Fetch a single Reddit post (with comments) through the tier chain."""
+async def fetch_reddit_structured(url: str) -> Dict[str, Any]:
+    """Fetch one Reddit post with rendered and structured content fields."""
     kind, info = parse_reddit_url(url)
 
     if kind == "subreddit":
@@ -1532,6 +1556,9 @@ async def fetch_reddit(url: str) -> Dict[str, Any]:
                     "id": info.get("id", ""),
                     "title": title,
                     "content": content,
+                    "body": content,
+                    "comments": [],
+                    "fetch_status": "jina_fallback",
                     "url": url,
                     "author": "reddit",
                     "author_name": "reddit",
@@ -1565,6 +1592,11 @@ async def fetch_reddit(url: str) -> Dict[str, Any]:
     result["more_expanded_count"] = more_stats["expanded_count"]
     result["more_remaining_count"] = more_stats["remaining_count"]
     return result
+
+
+async def fetch_reddit(url: str) -> Dict[str, Any]:
+    """Fetch a single Reddit post (with comments) through the tier chain."""
+    return await fetch_reddit_structured(url)
 
 
 async def fetch_reddit_search(
@@ -1682,8 +1714,12 @@ async def fetch_reddit_search(
     }
 
 
-async def fetch_reddit_subreddit(sub: str, sort: str = "hot", limit: int = 25) -> List[Dict[str, Any]]:
-    """Fetch a subreddit listing and re-render each post with comments."""
+async def fetch_reddit_subreddit_structured(
+    sub: str,
+    sort: str = "hot",
+    limit: int = 25,
+) -> List[Dict[str, Any]]:
+    """Fetch a subreddit listing with structured post body/comment fields."""
     if sort not in _VALID_SORTS:
         raise ValueError(f"未知 sort: {sort}（可选 {sorted(_VALID_SORTS)}）")
 
@@ -1735,10 +1771,19 @@ async def fetch_reddit_subreddit(sub: str, sort: str = "hot", limit: int = 25) -
             continue
         full_url = f"https://www.reddit.com{permalink}"
         try:
-            data = await fetch_reddit(full_url)
+            data = await fetch_reddit_structured(full_url)
             results.append(data)
         except Exception as exc:
             logger.warning(f"[Reddit] 第 {idx} 条 ({permalink}) 抓取失败: {exc}")
         if idx < len(children) and delay > 0:
             await asyncio.sleep(delay)
     return results
+
+
+async def fetch_reddit_subreddit(
+    sub: str,
+    sort: str = "hot",
+    limit: int = 25,
+) -> List[Dict[str, Any]]:
+    """Fetch a subreddit listing and re-render each post with comments."""
+    return await fetch_reddit_subreddit_structured(sub, sort=sort, limit=limit)
