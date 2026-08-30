@@ -456,27 +456,35 @@ Additional cookie files use the same format as Method 3. To get cookies:
 >
 > On 429, automatically switches to next available account. Auto-recovers after 15-minute cooldown.
 
-### TwitterAPI.io Paid API (Optional)
+### Twitter/X Paid APIs (Optional)
 
-Server-friendly alternative to browser search supplement. No tweet count limit, $0.15/1K tweets.
+Servers can use TwitterAPI.io or Xquik instead of the browser search supplement. The Xquik Twitter scraper API path follows its public OpenAPI contract for date filters, cursor pagination, and `Retry-After`.
 
 **Use cases**:
 - Auto-replaces Playwright browser search when tweets exceed 800 (just configure API Key)
-- Server deployment: `X_API_PROVIDER=api` for full API-only path, no cookies or browser needed
+- Server deployment: select `api` or `xquik` for a path without cookies or a browser
 
 ```env
 # .env configuration
 TWITTERAPI_IO_KEY=your_api_key       # Get from https://twitterapi.io
-# X_API_PROVIDER=graphql             # graphql(default) | api(full paid API)
-# X_API_SAVE_DIRECTLY=false          # true=save directly(fast,no images) | false=GraphQL supplement(recommended)
+XQUIK_API_KEY=your_xquik_api_key     # Get from https://dashboard.xquik.com
+# XQUIK_API_BASE_URL=https://xquik.com/api/v1
+# X_API_PROVIDER=graphql             # graphql(default) | api(TwitterAPI.io) | xquik
+# X_API_SAVE_DIRECTLY=false          # true=save provider data | false=use GraphQL enrichment
 # X_API_MIN_LIKES=                   # Min likes filter (empty=no filter, OR logic across all three)
 # X_API_MIN_RETWEETS=                # Min retweets filter
 # X_API_MIN_VIEWS=                   # Min views filter
 ```
 
-**Smart Direct Save** (`X_API_SAVE_DIRECTLY=true`): Normal tweets save API data directly (fast), articles and threads still use GraphQL for full media.
+When both keys are set in `graphql` mode, supplementary reads prefer TwitterAPI.io. Set `X_API_PROVIDER=xquik` to select Xquik explicitly.
 
-**Breakpoint Resume**: Discovery phase writes cache in real-time. Resume from where you left off after interruption without re-consuming API quota.
+**Smart Direct Save** (`X_API_SAVE_DIRECTLY=true`): Normal tweets use provider data. Xquik preserves public media; TwitterAPI.io does not return media. Articles and threads can still use GraphQL enrichment.
+
+**Breakpoint Resume**: Each provider has a separate cache. Xquik stores a cursor only after its page data is durable and follows `has_next_page` through empty pages.
+
+API reference: [Xquik Twitter API documentation](https://docs.xquik.com/api-reference/overview).
+
+Xquik is an independent third-party service. Not affiliated with X Corp. "Twitter" and "X" are trademarks of X Corp.
 
 ### Output Format
 
@@ -677,7 +685,9 @@ cp .env.example .env
 | `X_SEARCH_SUPPLEMENTARY` | No | Search supplement when UserTweets insufficient (default: `true`) |
 | `X_SEARCH_MAX_PAGES_PER_CHUNK` | No | Max pages per monthly search chunk (default: `50`) |
 | `TWITTERAPI_IO_KEY` | No | TwitterAPI.io paid API key from https://twitterapi.io |
-| `X_API_PROVIDER` | No | `graphql` (default) or `api` (full paid API) |
+| `XQUIK_API_KEY` | No | Xquik API key from https://dashboard.xquik.com |
+| `XQUIK_API_BASE_URL` | No | Xquik API base URL (default: `https://xquik.com/api/v1`) |
+| `X_API_PROVIDER` | No | `graphql` (default), `api` (TwitterAPI.io), or `xquik` |
 | `X_API_SAVE_DIRECTLY` | No | `true`=save API data directly / `false`=GraphQL supplement (default) |
 | `X_API_MIN_LIKES` | No | Min likes filter (empty=no filter, OR logic across all three) |
 | `X_API_MIN_RETWEETS` | No | Min retweets filter (empty=no filter) |
@@ -772,6 +782,8 @@ feedgrab/
 │   │   ├── twitter_search_tweets.py # Browser search supplement (breaks 800 limit)
 │   │   ├── twitter_keyword_search.py # Keyword search (x-so command, pure GraphQL + engagement-ranked table)
 │   │   ├── twitter_api.py     # TwitterAPI.io paid API client
+│   │   ├── xquik_api.py       # Xquik API client
+│   │   ├── twitter_paid_provider.py # Paid provider selection and pagination adapter
 │   │   ├── twitter_api_user_tweets.py # Paid API supplement/full fetch
 │   │   ├── twitter_markdown.py# Thread Markdown renderer (YAML front matter + media)
 │   │   ├── wechat.py          # Jina → Playwright WeChat JS extraction

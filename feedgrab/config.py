@@ -470,7 +470,7 @@ def x_search_browser_fallback() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# TwitterAPI.io paid API (supplementary / standalone)
+# Twitter/X paid API providers (supplementary / standalone)
 # ---------------------------------------------------------------------------
 
 def twitterapi_io_key() -> str:
@@ -482,14 +482,29 @@ def twitterapi_io_key() -> str:
     return os.getenv("TWITTERAPI_IO_KEY", "").strip()
 
 
+def xquik_api_key() -> str:
+    """Return the Xquik API key, or an empty string when unset."""
+    return os.getenv("XQUIK_API_KEY", "").strip()
+
+
+def xquik_api_base_url() -> str:
+    """Return the Xquik REST API base URL without a trailing slash."""
+    return (
+        os.getenv("XQUIK_API_BASE_URL", "https://xquik.com/api/v1")
+        .strip()
+        .rstrip("/")
+    )
+
+
 def x_api_provider() -> str:
     """API provider for user tweet batch fetch.
 
     'graphql' (default) — free GraphQL + optional API supplementary
     'api' — full TwitterAPI.io paid API path (no cookie needed, server-friendly)
+    'xquik' — full Xquik API path (no cookie needed, server-friendly)
     """
     val = os.getenv("X_API_PROVIDER", "graphql").strip().lower()
-    if val not in ("graphql", "api"):
+    if val not in ("graphql", "api", "xquik"):
         return "graphql"
     return val
 

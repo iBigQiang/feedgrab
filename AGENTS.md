@@ -6,7 +6,7 @@ feedgrab 是一个万能内容抓取器，从任意平台抓取内容并输出�
 
 - **仓库**：https://github.com/iBigQiang/feedgrab
 - **作者**：[@iBigQiang](https://github.com/iBigQiang)（强子手记）
-- **当前版本**：v0.26.0
+- **当前版本**：v0.27.0
 - **Python**：≥3.10
 - **许可证**：MIT
 
@@ -414,6 +414,7 @@ yt-dlp 默认只启用 deno。`_js_runtime_args()` 自动检测 deno/node/bun �
 
 | 版本 | 功能 |
 |------|------|
+| v0.27.0 | 新增 Xquik 付费读取 provider；统一付费 provider 选择、日期边界和断点续传 |
 | v0.26.0 | main CLI 对齐 feedgrab-desktop v0.1.14 的后端能力：新增 Reddit 搜索与评论模式增强、X/Twitter `zh+zxx` Article 搜索覆盖和 Live+Top 合并排序、全局代理 service 设置、批量/MCP 结构化失败返回与用户可见中文消息补齐；保持 desktop worker/安装包/GUI 文件不合入 main |
 | v0.25.0 | 第一阶段 service layer 架构升级：新增 `feedgrab/service/` 的结构化 API（models / FetchService / Output / Login / Settings / Doctor / Job），CLI 单 URL 和 MCP 入口改为共用 `FetchService`，保持终端命令、Markdown 输出、去重索引和 session 格式兼容；修复 MP 后台 session 失效错误被掩盖问题；FlowUs 在线图片模式改为写入可预览的 `cdn2.flowus.cn` 签名 URL，本地模式仍通过 `FLOWUS_DOWNLOAD_IMAGES=true` 下载 `attachments/`；测试 210 passed |
 | v0.21.0 | 新增「知识星球」（Zsxq）平台支持（articles.zsxq.com 长文章 + wx.zsxq.com 短帖 + t.zsxq.com 短链 302 解析）；4 级 Tier 链路 + 五形态 topic 渲染（含 solution）+ 三态评论筛选 |

@@ -6,7 +6,7 @@ feedgrab 是一个万能内容抓取器，从任意平台抓取内容并输出�
 
 - **仓库**：https://github.com/iBigQiang/feedgrab
 - **作者**：[@iBigQiang](https://github.com/iBigQiang)（强子手记）
-- **当前版本**：v0.26.0
+- **当前版本**：v0.27.0
 - **Python**：≥3.10
 - **许可证**：MIT
 
@@ -194,6 +194,7 @@ feedgrab/
 
 | 版本 | 功能 |
 |------|------|
+| v0.27.0 | 新增 Xquik 付费读取 provider；统一付费 provider 选择、日期边界和断点续传 |
 | v0.26.0 | main CLI 对齐 feedgrab-desktop v0.1.14 的后端能力：新增 Reddit 搜索与评论模式增强、X/Twitter `zh+zxx` Article 搜索覆盖和 Live+Top 合并排序、全局代理 service 设置、批量/MCP 结构化失败返回与用户可见中文消息补齐；保持 desktop worker/安装包/GUI 文件不合入 main |
 | v0.25.0 | 第一阶段 service layer 架构升级：新增 `feedgrab/service/` 的结构化 API（models / FetchService / Output / Login / Settings / Doctor / Job），CLI 单 URL 和 MCP 入口改为共用 `FetchService`，保持终端命令、Markdown 输出、去重索引和 session 格式兼容；修复 MP 后台 session 失效错误被掩盖问题；FlowUs 在线图片模式改为写入可预览的 `cdn2.flowus.cn` 签名 URL，本地模式仍通过 `FLOWUS_DOWNLOAD_IMAGES=true` 下载 `attachments/`；测试 210 passed |
 | v0.24.1 | 修复 Twitter 多账号 429 轮换：抽出 `fetch_with_cookie_rotation()` helper（`twitter_cookies.py`），统一 7 个批量 fetcher（user_tweets / bookmarks / list / user_lists / retweeters / search_people / keyword_search）的"账号限流后跨账号重试"逻辑；之前重试仅复用同一被限流账号 3 次就停（user_tweets）或直接 break（其余 6 个），现在改为**每个账号都试一遍**才真正终止；关键日志统一加 `>>> ... <<<` 高亮 + 剩余可用账号数 + 最早解封倒计时；测试 193 → 201；实测 `feedgrab https://x.com/AdrianPunk115` 抓取量 557 → 632（+13.4%） |
