@@ -1809,6 +1809,8 @@ def cmd_twitter_search(args: list):
         print(f"\n\U0001f50d X 批量搜索：{len(keywords)} 个关键词（{mode}）")
 
     all_tweets_merged: list[dict] = []
+    merged_tweet_urls: set[str] = set()
+    merged_duplicate_count = 0
     successful_keywords = 0
     failed_keywords: list[str] = []
 
@@ -1847,8 +1849,16 @@ def cmd_twitter_search(args: list):
             successful_keywords += 1
             if merge:
                 for td in result.get("tweets", []):
+                    # 按推文 URL 跨关键词去重：同一条推文命中多个关键词只保留首次出现的记录
+                    tweet_id = str(td.get("id", "") or "")
+                    tweet_author = str(td.get("author", "") or "")
+                    tweet_url = f"https://x.com/{tweet_author}/status/{tweet_id}"
+                    if not tweet_id or tweet_url in merged_tweet_urls:
+                        merged_duplicate_count += 1
+                        continue
+                    merged_tweet_urls.add(tweet_url)
                     td["_keyword"] = keyword
-                all_tweets_merged.extend(result.get("tweets", []))
+                    all_tweets_merged.append(td)
         except KeyboardInterrupt:
             print("\n\u23f9 已取消")
             return
@@ -1889,6 +1899,8 @@ def cmd_twitter_search(args: list):
         print(f"\n\U0001f4ca 合并汇总：{merged_path}")
         print(f"   CSV: {merged_path.with_suffix('.csv')}")
         print(f"   总数：{len(all_tweets_merged)} 条推文，来自 {len(keywords)} 个关键词")
+        if merged_duplicate_count:
+            print(f"   已按推文链接去重：移除 {merged_duplicate_count} 条跨关键词重复记录")
 
 
 def cmd_twitter_tweet_user_list(args: list, mode: str):

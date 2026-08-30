@@ -268,6 +268,58 @@ def test_cli_twitter_search_merge_uses_all_sort_output_dir(monkeypatch, tmp_path
     assert not list(tmp_path.glob("X/search/3day_hot/alpha+beta_*.md"))
 
 
+def test_cli_twitter_search_merge_dedupes_cross_keyword_tweets(monkeypatch, tmp_path, capsys):
+    import feedgrab.cli as cli
+    import feedgrab.config as config
+    import feedgrab.fetchers.twitter_keyword_search as search_module
+
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+    monkeypatch.delenv("OBSIDIAN_VAULT", raising=False)
+    monkeypatch.setattr(config, "x_search_enabled", lambda: True)
+    monkeypatch.setattr(config, "x_search_lang", lambda: "zh+zxx")
+    monkeypatch.setattr(config, "x_search_days", lambda: 1)
+    monkeypatch.setattr(config, "x_search_min_faves", lambda: 0)
+    monkeypatch.setattr(config, "x_search_min_retweets", lambda: 0)
+    monkeypatch.setattr(config, "x_search_sort", lambda: "all")
+    monkeypatch.setattr(config, "x_search_exclude_retweets", lambda: True)
+    monkeypatch.setattr(config, "x_search_delay", lambda: 0)
+    monkeypatch.setattr(config, "x_search_max_results", lambda: 10)
+    monkeypatch.setattr(config, "x_search_save_tweets", lambda: False)
+    monkeypatch.setattr(config, "x_search_merge_keywords", lambda: True)
+
+    shared_tweet = {
+        "id": "1001",
+        "author": "bigqiang",
+        "text": "chatgpt and codex",
+        "views": 10,
+    }
+
+    async def fake_search(**kwargs):
+        tweets = [dict(shared_tweet)]
+        if kwargs["keyword"] == "beta":
+            # 模拟同一关键词内部 sort=all / lang=zh+zxx 展开后的重复
+            tweets.append(dict(shared_tweet))
+        return {
+            "total": len(tweets),
+            "saved": 0,
+            "query": kwargs["keyword"],
+            "output_path": "",
+            "csv_path": "",
+            "tweets": tweets,
+        }
+
+    monkeypatch.setattr(search_module, "search_twitter_keyword", fake_search)
+
+    cli.cmd_twitter_search(["alpha,beta"])
+
+    out = capsys.readouterr().out
+    merged_files = list(tmp_path.glob("X/search/1day_all/alpha+beta_*.md"))
+    assert len(merged_files) == 1
+    text = merged_files[0].read_text(encoding="utf-8")
+    assert text.count("https://x.com/bigqiang/status/1001") == 1
+    assert "移除 2 条跨关键词重复记录" in out
+
+
 def test_mcp_read_url_uses_fetch_service(monkeypatch):
     _install_fake_mcp(monkeypatch)
 
