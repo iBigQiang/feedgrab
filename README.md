@@ -486,27 +486,35 @@ sessions/
 >
 > 429 时自动切换到下一个未限流账号，15 分钟冷却后自动恢复。
 
-### TwitterAPI.io 付费 API（可选）
+### Twitter/X 付费 API（可选）
 
-替代浏览器搜索补充的服务器友好方案，无推文数量限制，$0.15/千条。
+服务器可以使用 TwitterAPI.io 或 Xquik 补充浏览器搜索。Xquik 路径按公开 OpenAPI contract 使用日期过滤、cursor 分页和 `Retry-After`。
 
 **使用场景**：
 - 推文超过 800 条时自动替代 Playwright 浏览器搜索（配置 API Key 即可）
-- 服务器部署：`X_API_PROVIDER=api` 全量走付费 API，无需 Cookie 和浏览器
+- 服务器部署：选择 `api` 或 `xquik`，无需 Cookie 和浏览器
 
 ```env
 # .env 配置
 TWITTERAPI_IO_KEY=your_api_key       # 从 https://twitterapi.io 获取
-# X_API_PROVIDER=graphql             # graphql(默认) | api(全量付费API)
-# X_API_SAVE_DIRECTLY=false          # true=直接保存(快,无图片) | false=GraphQL补全(推荐)
+XQUIK_API_KEY=your_xquik_api_key     # 从 https://dashboard.xquik.com 获取
+# XQUIK_API_BASE_URL=https://xquik.com/api/v1
+# X_API_PROVIDER=graphql             # graphql(默认) | api(TwitterAPI.io) | xquik
+# X_API_SAVE_DIRECTLY=false          # true=直接保存 API 数据 | false=GraphQL 补全
 # X_API_MIN_LIKES=                   # 最低点赞数（留空=不过滤，三项为 OR 关系）
 # X_API_MIN_RETWEETS=                # 最低转发数
 # X_API_MIN_VIEWS=                   # 最低阅读量
 ```
 
-**智能直保模式** (`X_API_SAVE_DIRECTLY=true`)：普通推文用 API 数据直接保存（快速），长文(article)和线程(thread)仍走 GraphQL 获取完整媒体。
+`graphql` 模式同时配置 2 个 Key 时，补充抓取优先使用 TwitterAPI.io。设置 `X_API_PROVIDER=xquik` 可固定使用 Xquik。
 
-**断点续传**：发现阶段实时写入缓存文件，中断后重新运行从断点继续，不重复消耗 API 额度。
+**智能直保模式** (`X_API_SAVE_DIRECTLY=true`)：普通推文直接使用 provider 数据。Xquik 会保留公开媒体；TwitterAPI.io 不返回媒体。长文和线程仍可走 GraphQL 补全。
+
+**断点续传**：每个 provider 使用独立缓存。Xquik cursor 仅在页面数据落盘后保存，空结果页也会按 `has_next_page` 继续。
+
+API 文档：[Xquik Twitter API 文档](https://docs.xquik.com/api-reference/overview)。
+
+Xquik is an independent third-party service. Not affiliated with X Corp. "Twitter" and "X" are trademarks of X Corp.
 
 ### 输出格式
 
@@ -754,7 +762,9 @@ cp .env.example .env
 | `X_SEARCH_SUPPLEMENTARY` | 否 | 搜索补充开关，UserTweets 不够时自动按月搜索补充（默认：`true`） |
 | `X_SEARCH_MAX_PAGES_PER_CHUNK` | 否 | 每个月度搜索分片最大分页数（默认：`50`） |
 | `TWITTERAPI_IO_KEY` | 否 | TwitterAPI.io 付费 API Key，从 https://twitterapi.io 获取 |
-| `X_API_PROVIDER` | 否 | `graphql`（默认）或 `api`（全量走付费 API） |
+| `XQUIK_API_KEY` | 否 | Xquik API Key，从 https://dashboard.xquik.com 获取 |
+| `XQUIK_API_BASE_URL` | 否 | Xquik API Base URL（默认：`https://xquik.com/api/v1`） |
+| `X_API_PROVIDER` | 否 | `graphql`（默认）、`api`（TwitterAPI.io）或 `xquik` |
 | `X_API_SAVE_DIRECTLY` | 否 | `true`=直接保存 API 数据 / `false`=GraphQL 补全（默认） |
 | `X_API_MIN_LIKES` | 否 | 最低点赞数过滤（留空=不过滤，三项 OR 关系） |
 | `X_API_MIN_RETWEETS` | 否 | 最低转发数过滤（留空=不过滤） |
@@ -863,6 +873,8 @@ feedgrab/
 │   │   ├── twitter_search_tweets.py# 浏览器搜索补充（突破 UserTweets 800 条限制，按月分片+响应拦截）
 │   │   ├── twitter_keyword_search.py# 关键词搜索（x-so 命令，纯 GraphQL + 互动排序汇总表格）
 │   │   ├── twitter_api.py       # TwitterAPI.io 付费 API 客户端（搜索+用户推文）
+│   │   ├── xquik_api.py         # Xquik API 客户端（搜索+用户推文）
+│   │   ├── twitter_paid_provider.py# 付费 provider 选择与分页适配
 │   │   ├── twitter_api_user_tweets.py# 付费 API 补充/全量抓取（替代浏览器搜索）
 │   │   ├── twitter_markdown.py# 线程 Markdown 渲染器（YAML front matter + 媒体）
 │   │   ├── wechat.py          # Jina → Playwright WeChat JS 提取

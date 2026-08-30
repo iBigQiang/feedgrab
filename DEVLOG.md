@@ -2,6 +2,30 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-08-31 · v0.27.0 · Xquik 付费读取 provider
+
+### 背景
+
+feedgrab 的服务器路径只支持 TwitterAPI.io。用户无法选择 Xquik 完成搜索补充或用户推文批量抓取。原付费抓取器还忽略了 `initial_max_id`，导致补充抓取从最新结果重新开始。
+
+### 实施
+
+- 新增 `X_API_PROVIDER=xquik`、`XQUIK_API_KEY` 和可覆盖的 API Base URL。
+- 使用 Xquik 公开 OpenAPI 的 `q`、日期过滤、`pageSize`、cursor 和 `has_next_page` contract。
+- 遇到 `429` 时读取 `Retry-After`。认证和余额错误立即停止。日志不记录错误响应正文。
+- 新增独立 provider adapter。TwitterAPI.io 保留 `max_id` 分页；Xquik 使用结构化日期边界和 cursor。
+- 每个 provider 使用独立缓存。Xquik 仅在页面数据落盘后保存下一个 cursor。空页仍按 `has_next_page` 继续。
+- 修复 `initial_max_id` 未传给 TwitterAPI.io 搜索的问题。
+- Xquik 直接保存模式保留公开图片、最高码率 MP4、引用推文和扩展元数据。
+
+### 验证
+
+- 10 个 Xquik 和 provider 回归测试在 Python 3.10、3.11、3.12 和 3.13 通过。
+- Xquik 与 Twitter 渲染聚焦测试共 13 个，全部通过。
+- 排除仓库未提交的 3 个 Feishu 调试 fixture 测试后，全量回归 271 passed。
+- 完整测试为 271 passed, 3 failed。3 个失败只缺少 `output/debug_feishu_req558.json`、`debug_feishu_req600.json` 和 `debug_feishu_req601.json`。
+- 新文件通过 Ruff 和 Ruff format。改动的既有 Python 文件通过 E9、F63、F7 和 F82 检查。
+
 ## 2026-08-31 · Reddit 图片在 Obsidian 不渲染修复 + REDDIT_DOWNLOAD_MEDIA
 
 ### 背景

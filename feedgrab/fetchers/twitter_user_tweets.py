@@ -596,18 +596,24 @@ async def fetch_user_tweets(
     logger.info(f"[UserTweets] 索引更新: {initial_count} -> {len(saved_ids)} 条")
 
     # Search supplementary: fill historical gap beyond UserTweets limit
-    from feedgrab.config import x_search_supplementary_enabled, twitterapi_io_key
+    from feedgrab.config import x_search_supplementary_enabled
+    from feedgrab.fetchers.twitter_paid_provider import (
+        configured_paid_provider_name,
+        load_paid_provider,
+    )
     if (since_date
         and earliest_tweet_date
         and earliest_tweet_date > since_date
         and x_search_supplementary_enabled()):
 
         try:
-            if twitterapi_io_key():
+            paid_provider_id = configured_paid_provider_name()
+            if paid_provider_id:
                 # Paid API supplementary (no browser needed, server-friendly)
+                paid_provider = load_paid_provider(paid_provider_id)
                 logger.info(
                     f"[UserTweets] UserTweets 最早到 {earliest_tweet_date}，"
-                    f"目标日期 {since_date}，启动 TwitterAPI.io 补充抓取"
+                    f"目标日期 {since_date}，启动 {paid_provider.label} 补充抓取"
                 )
                 from feedgrab.fetchers.twitter_api_user_tweets import fetch_api_supplementary
                 search_result = await fetch_api_supplementary(

@@ -1,22 +1,19 @@
 # -*- coding: utf-8 -*-
-"""
-Twitter/X User Tweets batch fetcher via TwitterAPI.io paid API.
+"""Twitter/X user-tweet batch fetcher for paid read providers.
 
 Two entry points:
     1. fetch_api_supplementary() — replaces Playwright browser search supplementary
        Called from twitter_user_tweets.py when UserTweets hits ~800 limit.
     2. fetch_api_user_tweets() — standalone full API path
-       Called from reader.py when X_API_PROVIDER=api (server deployment).
+       Called from reader.py for an explicitly selected paid provider.
 
 Design:
     - "API discover + GraphQL download" hybrid strategy
     - API discovers all tweet IDs via Advanced Search (no count limit)
     - GraphQL fetches full data per tweet (images, videos, threads)
-    - OR: direct save mode skips GraphQL (faster, no media)
+    - OR: direct save mode preserves the selected provider's public data
     - Shares dedup index with GraphQL mode (seamless switching)
     - Supports engagement filtering (likes/retweets/views, OR logic)
-
-Cost: ~$0.15 per 1,000 tweets discovered via API.
 """
 
 import json
@@ -37,11 +34,7 @@ from feedgrab.config import (
     x_api_min_views,
     parse_twitter_date_local,
 )
-from feedgrab.fetchers.twitter_api import (
-    search_tweets,
-    get_user_last_tweets,
-    parse_api_tweet,
-)
+from feedgrab.fetchers.twitter_paid_provider import PaidXProvider, load_paid_provider
 from feedgrab.fetchers.twitter_bookmarks import (
     _classify_tweet,
     _build_single_tweet_data,
@@ -106,30 +99,38 @@ def _passes_engagement_filter(tweet_data: dict) -> bool:
 # Discovery cache — breakpoint resume support
 # ---------------------------------------------------------------------------
 
-def _get_cache_path(screen_name: str, since_date: str = "") -> Path:
+def _get_cache_path(
+    screen_name: str,
+    since_date: str = "",
+    until_date: str = "",
+    provider: str = "api",
+) -> Path:
     """Return path to the discovery cache JSONL file."""
     from feedgrab.utils.dedup import get_index_path
     index_dir = get_index_path().parent
     index_dir.mkdir(parents=True, exist_ok=True)
     suffix = f"_since_{since_date}" if since_date else ""
-    return index_dir / f".api_discovery_{screen_name.lower()}{suffix}.jsonl"
+    suffix += f"_until_{until_date}" if until_date else ""
+    return index_dir / f".{provider}_discovery_{screen_name.lower()}{suffix}.jsonl"
 
 
-def _load_discovery_cache(cache_path: Path) -> tuple[List[dict], set, bool]:
+def _load_discovery_cache(cache_path: Path) -> tuple[List[dict], set, bool, str]:
     """Load previously discovered tweets from cache file.
 
     Returns:
-        (cached_tweets, seen_ids, is_complete)
+        (cached_tweets, seen_ids, is_complete, resume_cursor)
         - cached_tweets: list of parsed tweet dicts
         - seen_ids: set of tweet IDs already discovered
         - is_complete: True if discovery was fully completed last time
+        - resume_cursor: Last durable provider cursor for an interrupted run
     """
     if not cache_path.exists():
-        return [], set(), False
+        return [], set(), False, ""
 
     cached_tweets = []
     seen_ids = set()
     is_complete = False
+    resume_cursor = ""
 
     try:
         with open(cache_path, "r", encoding="utf-8") as f:
@@ -145,6 +146,9 @@ def _load_discovery_cache(cache_path: Path) -> tuple[List[dict], set, bool]:
                 if entry.get("_status") == "complete":
                     is_complete = True
                     continue
+                if "_cursor" in entry:
+                    resume_cursor = str(entry["_cursor"] or "")
+                    continue
 
                 tweet_id = entry.get("id", "")
                 if tweet_id and tweet_id not in seen_ids:
@@ -152,9 +156,9 @@ def _load_discovery_cache(cache_path: Path) -> tuple[List[dict], set, bool]:
                     cached_tweets.append(entry)
     except Exception as e:
         logger.warning(f"[API-Cache] 缓存文件读取失败: {e}")
-        return [], set(), False
+        return [], set(), False, ""
 
-    return cached_tweets, seen_ids, is_complete
+    return cached_tweets, seen_ids, is_complete, resume_cursor
 
 
 def _append_to_cache(cache_path: Path, tweets: List[dict]):
@@ -162,6 +166,12 @@ def _append_to_cache(cache_path: Path, tweets: List[dict]):
     with open(cache_path, "a", encoding="utf-8") as f:
         for t in tweets:
             f.write(json.dumps(t, ensure_ascii=False) + "\n")
+
+
+def _save_resume_cursor(cache_path: Path, cursor: str):
+    """Persist the next provider cursor after its page data is durable."""
+    with open(cache_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"_cursor": cursor}, ensure_ascii=False) + "\n")
 
 
 def _mark_cache_complete(cache_path: Path):
@@ -172,6 +182,14 @@ def _mark_cache_complete(cache_path: Path):
                             ensure_ascii=False) + "\n")
 
 
+def _timeline_tweets(response: dict) -> list:
+    """Read tweets from Xquik's top level or TwitterAPI.io's data wrapper."""
+    nested = response.get("data")
+    payload = nested if isinstance(nested, dict) and "tweets" in nested else response
+    tweets = payload.get("tweets") or []
+    return tweets if isinstance(tweets, list) else []
+
+
 # ---------------------------------------------------------------------------
 # API discovery — paginate to collect all tweets
 # ---------------------------------------------------------------------------
@@ -180,184 +198,141 @@ def _discover_tweets_via_search(
     screen_name: str,
     since_date: str = "",
     initial_max_id: int = None,
+    until_date: str = "",
     max_pages: int = 5000,
+    provider: Optional[PaidXProvider] = None,
 ) -> List[dict]:
-    """Discover all tweets via Advanced Search API with max_id pagination.
-
-    Strategy: **ID-based pagination** using ``max_id:{id}`` in the query string.
-
-    Each page returns ~20 tweets. We take the smallest tweet ID on each page,
-    subtract 1, and inject ``max_id:{smallest_id - 1}`` into the next query.
-    This leverages Twitter's Snowflake IDs (monotonically increasing) for
-    precise, gap-free pagination.
-
-    **Important**: TwitterAPI.io's ``since:``, ``until:``, and direct ``max_id``
-    jump operators are unreliable for historical dates. Therefore:
-    - The query uses only ``from:{screen_name}`` (no date operators)
-    - Date filtering (since_date) is done in-code after receiving results
-    - ``max_id`` is only used incrementally (from previous page's smallest ID)
-
-    **Breakpoint resume**: Discovered tweets are written to a JSONL cache file
-    in real-time. If interrupted, the next run loads the cache and resumes
-    from the last known position (smallest cached ID).
-
-    Args:
-        screen_name: Twitter handle (without @)
-        since_date: Start date filter (inclusive), format YYYY-MM-DD.
-            Applied in-code, not via search operator.
-        initial_max_id: Ignored (kept for API compatibility). TwitterAPI.io
-            does not support jumping to arbitrary historical IDs.
-        max_pages: Safety limit on total pages (default 5000 = ~100k tweets)
-
-    Returns:
-        List of parsed tweet dicts (from parse_api_tweet).
-    """
-    # --- Check discovery cache for resume ---
-    cache_path = _get_cache_path(screen_name, since_date)
-    cached_tweets, seen_ids, is_complete = _load_discovery_cache(cache_path)
-
-    if is_complete and cached_tweets:
+    """Discover tweets with provider-native pagination and durable resume state."""
+    active_provider = provider or load_paid_provider()
+    cache_path = _get_cache_path(
+        screen_name,
+        since_date,
+        until_date,
+        provider=active_provider.cache_prefix,
+    )
+    cached_tweets, seen_ids, is_complete, resume_cursor = _load_discovery_cache(
+        cache_path
+    )
+    if is_complete:
         logger.info(
-            f"[API-Search] 发现缓存已完成，直接加载 {len(cached_tweets)} 条推文 "
+            f"[API-Search] 缓存已完成，加载 {len(cached_tweets)} 条推文 "
             f"(缓存: {cache_path.name})"
         )
         return cached_tweets
 
-    # Resume from cache: find smallest ID to continue from
     all_tweets = list(cached_tweets)
-    max_id = None  # Will be set from cache if resuming
+    max_id = initial_max_id
+    cursor = resume_cursor if active_provider.provider_id == "xquik" else ""
+    seen_cursors = {cursor} if cursor else set()
 
-    if seen_ids:
-        # Find smallest ID in cache → resume from there
-        min_cached_id = None
-        for tid_str in seen_ids:
+    if seen_ids and active_provider.provider_id != "xquik":
+        numeric_ids = []
+        for tweet_id in seen_ids:
             try:
-                tid_int = int(tid_str)
-                if min_cached_id is None or tid_int < min_cached_id:
-                    min_cached_id = tid_int
+                numeric_ids.append(int(tweet_id))
             except ValueError:
-                pass
-        if min_cached_id is not None:
-            max_id = min_cached_id - 1
-        logger.info(
-            f"[API-Search] 从缓存续传: 已有 {len(all_tweets)} 条，"
-            f"从 max_id={max_id} 继续 (缓存: {cache_path.name})"
-        )
-    else:
-        logger.info(
-            f"[API-Search] max_id 分页: from:{screen_name} "
-            f"(since_date={since_date or '全部'} 代码层过滤)"
-        )
+                continue
+        if numeric_ids:
+            cached_max_id = min(numeric_ids) - 1
+            max_id = min(max_id, cached_max_id) if max_id is not None else cached_max_id
 
-    # Track consecutive empty-after-filter pages to detect search index gap
-    consecutive_empty = 0
+    logger.info(
+        f"[API-Search] provider={active_provider.label}, "
+        f"缓存={len(all_tweets)}, since={since_date or '全部'}, "
+        f"until={until_date or '不限'}"
+    )
 
+    consecutive_old_pages = 0
+    pages_queried = 0
     for page in range(1, max_pages + 1):
-        # Build query: only from: + max_id (no since:/until: — unreliable)
-        query = f"from:{screen_name}"
-        if max_id is not None:
-            query += f" max_id:{max_id}"
-
-        response = search_tweets(query, query_type="Latest")
+        pages_queried = page
+        response = active_provider.search_tweets(
+            screen_name,
+            cursor=cursor,
+            max_id=max_id,
+            since_date=since_date,
+            until_date=until_date,
+        )
         if not response:
             logger.warning(f"[API-Search] P{page}: API 请求失败，停止")
             break
 
-        raw_tweets = response.get("tweets", [])
-        if not raw_tweets:
-            logger.info(
-                f"[API-Search] P{page}: 空页，发现结束 "
-                f"(累计 {len(all_tweets)})"
-            )
-            # Discovery complete — mark cache
-            _mark_cache_complete(cache_path)
+        raw_tweets = response.get("tweets") or []
+        if not isinstance(raw_tweets, list):
+            logger.warning(f"[API-Search] P{page}: tweets 字段无效，停止")
             break
 
-        page_new = 0
-        min_id_on_page = None
         page_parsed = []
-        page_too_old = 0  # tweets before since_date on this page
-
+        page_too_old = 0
+        min_id_on_page = None
         for raw in raw_tweets:
-            tweet_id = raw.get("id", "")
+            if not isinstance(raw, dict):
+                continue
+            tweet_id = str(raw.get("id", ""))
             if not tweet_id:
                 continue
-
-            # Track smallest ID for pagination (even for filtered tweets)
             try:
-                tid_int = int(tweet_id)
-                if min_id_on_page is None or tid_int < min_id_on_page:
-                    min_id_on_page = tid_int
+                numeric_id = int(tweet_id)
+                if min_id_on_page is None or numeric_id < min_id_on_page:
+                    min_id_on_page = numeric_id
             except ValueError:
                 pass
-
             if tweet_id in seen_ids:
                 continue
             seen_ids.add(tweet_id)
-
-            parsed = parse_api_tweet(raw)
-
-            # In-code date filtering: skip tweets before since_date
+            parsed = active_provider.parse_api_tweet(raw)
             if since_date:
-                tweet_date = parse_twitter_date_local(
-                    parsed.get("created_at", "")
-                )
+                tweet_date = parse_twitter_date_local(parsed.get("created_at", ""))
                 if tweet_date and tweet_date < since_date:
                     page_too_old += 1
                     continue
-
             all_tweets.append(parsed)
             page_parsed.append(parsed)
-            page_new += 1
 
-        # Write this page to cache immediately
         if page_parsed:
             _append_to_cache(cache_path, page_parsed)
-
-        # Progress log every 50 pages + first 3 pages
         if page % 50 == 0 or page <= 3:
-            extra = f" 过早:{page_too_old}" if page_too_old else ""
+            old_text = f" 过早:{page_too_old}" if page_too_old else ""
             logger.info(
-                f"[API-Search] P{page}: +{page_new} 新 "
-                f"(累计 {len(all_tweets)}{extra})"
+                f"[API-Search] P{page}: +{len(page_parsed)} 新 "
+                f"(累计 {len(all_tweets)}{old_text})"
             )
 
-        # Pagination end conditions
-        if page_new == 0:
-            if page_too_old > 0:
-                # All new tweets on this page are before since_date
-                consecutive_empty += 1
-                if consecutive_empty >= 3:
-                    logger.info(
-                        f"[API-Search] P{page}: 连续 {consecutive_empty} 页"
-                        f"全部早于 {since_date}，发现结束 "
-                        f"(累计 {len(all_tweets)})"
-                    )
-                    _mark_cache_complete(cache_path)
-                    break
-            else:
-                # Genuine exhaustion (all duplicates or empty)
-                logger.info(
-                    f"[API-Search] P{page}: 无新推文，发现结束 "
-                    f"(累计 {len(all_tweets)})"
-                )
+        if page_too_old and not page_parsed:
+            consecutive_old_pages += 1
+            if consecutive_old_pages >= 3:
                 _mark_cache_complete(cache_path)
+                logger.info(f"[API-Search] 连续 3 页早于 {since_date}，发现结束")
                 break
         else:
-            consecutive_empty = 0
+            consecutive_old_pages = 0
 
-        # Advance: next page starts below smallest ID on this page
-        if min_id_on_page is not None:
-            max_id = min_id_on_page - 1
+        if active_provider.provider_id == "xquik":
+            has_next = bool(response.get("has_next_page"))
+            next_cursor = str(response.get("next_cursor") or "")
+            if not has_next:
+                _mark_cache_complete(cache_path)
+                break
+            if not next_cursor or next_cursor in seen_cursors:
+                logger.warning("[API-Search] Xquik 返回无效或重复 cursor，保留续传状态")
+                break
+            _save_resume_cursor(cache_path, next_cursor)
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
         else:
-            logger.info(f"[API-Search] P{page}: 无法提取 ID，停止")
-            break
+            if not raw_tweets:
+                _mark_cache_complete(cache_path)
+                break
+            if min_id_on_page is None:
+                logger.warning(f"[API-Search] P{page}: 无法提取 ID，保留续传状态")
+                break
+            max_id = min_id_on_page - 1
 
         time.sleep(0.3)
 
     logger.info(
         f"[API-Search] 发现完成: {len(all_tweets)} 条去重推文, "
-        f"{page} 页查询"
+        f"{pages_queried} 页查询"
     )
     return all_tweets
 
@@ -367,7 +342,11 @@ def _discover_tweets_via_search(
 # ---------------------------------------------------------------------------
 
 def _save_batch_record(
-    tweet_list: list, screen_name: str, since_date: str = "", prefix: str = "api"
+    tweet_list: list,
+    screen_name: str,
+    since_date: str = "",
+    prefix: str = "api",
+    provider_label: str = "TwitterAPI.io",
 ) -> str:
     """Save batch record to a JSON file in the index/ directory."""
     from feedgrab.utils.dedup import get_index_path
@@ -388,7 +367,7 @@ def _save_batch_record(
     payload = {
         "fetched_at": datetime.now().isoformat(),
         "screen_name": screen_name,
-        "provider": "twitterapi.io",
+        "provider": provider_label,
         "since": since_date or "",
         "total": len(tweet_list),
         "tweets": tweet_list,
@@ -669,8 +648,8 @@ async def fetch_api_supplementary(
     """Fetch historical tweets via paid API to supplement UserTweets.
 
     Replaces twitter_search_tweets.fetch_search_supplementary().
-    Called from twitter_user_tweets.py when UserTweets hits ~800 limit
-    and TWITTERAPI_IO_KEY is configured.
+    Called from twitter_user_tweets.py when UserTweets hits its timeline limit
+    and a paid provider key is configured.
 
     Args:
         screen_name: Twitter handle (without @)
@@ -680,14 +659,14 @@ async def fetch_api_supplementary(
         subfolder: Save subdirectory (e.g. "status_强子手记")
         saved_ids: Shared dedup index dict
         is_force: Whether FORCE_REFETCH is enabled
-        earliest_tweet_id: Tweet ID of the earliest UserTweets entry (used as
-            initial max_id upper bound). Required because TwitterAPI.io's
-            ``until:`` operator does not work for historical dates.
+        earliest_tweet_id: Tweet ID of the earliest UserTweets entry. The
+            TwitterAPI.io adapter uses it as an initial max_id bound.
 
     Returns:
         dict with: total, fetched, skipped, failed
     """
-    log_prefix = "[API-Supplementary]"
+    provider = load_paid_provider()
+    log_prefix = f"[{provider.label}-Supplementary]"
     logger.info(
         f"{log_prefix} 补充抓取 @{screen_name}，"
         f"范围: {since_date} → {earliest_tweet_date}"
@@ -702,9 +681,7 @@ async def fetch_api_supplementary(
         f"min_views={x_api_min_views()}"
     )
 
-    # Phase 1: Discover tweets via API
-    # Use earliest_tweet_id as initial max_id (TwitterAPI.io's until: operator
-    # does not work for historical dates, so we use real tweet ID as upper bound)
+    # Phase 1: Discover tweets via the selected provider.
     initial_max_id = None
     if earliest_tweet_id:
         try:
@@ -716,6 +693,8 @@ async def fetch_api_supplementary(
         screen_name,
         since_date=since_date,
         initial_max_id=initial_max_id,
+        until_date=earliest_tweet_date,
+        provider=provider,
     )
 
     if not all_tweets:
@@ -756,10 +735,10 @@ async def fetch_api_supplementary(
 # ---------------------------------------------------------------------------
 
 async def fetch_api_user_tweets(profile_url: str) -> dict:
-    """Batch-fetch ALL tweets from a user via TwitterAPI.io paid API.
+    """Batch-fetch all available tweets through the selected paid provider.
 
-    Standalone full API path — does not depend on GraphQL UserTweets.
-    Used when X_API_PROVIDER=api (server deployment, no cookies needed).
+    This standalone path does not depend on GraphQL UserTweets. It runs when
+    X_API_PROVIDER is ``api`` or ``xquik``.
 
     Two-phase "API discover + GraphQL download" strategy:
     Phase 1: API discovers all tweet IDs (no count limit)
@@ -771,7 +750,8 @@ async def fetch_api_user_tweets(profile_url: str) -> dict:
     Returns:
         dict with: total, fetched, skipped, failed, filtered, list_path
     """
-    log_prefix = "[API-UserTweets]"
+    provider = load_paid_provider()
+    log_prefix = f"[{provider.label}-UserTweets]"
 
     from feedgrab.fetchers.twitter_fxtwitter import reset_circuit_breaker
     reset_circuit_breaker()
@@ -786,7 +766,7 @@ async def fetch_api_user_tweets(profile_url: str) -> dict:
     is_force = force_refetch()
 
     logger.info(
-        f"{log_prefix} 配置: provider=api, "
+        f"{log_prefix} 配置: provider={provider.provider_id}, "
         f"save_directly={x_api_save_directly()}, "
         f"since={since_date or '全部'}, "
         f"min_likes={x_api_min_likes()}, "
@@ -796,47 +776,50 @@ async def fetch_api_user_tweets(profile_url: str) -> dict:
 
     # 3. Phase 1 — Discover all tweets via API
     logger.info(f"{log_prefix} === 第一阶段：API 发现推文 ===")
-    all_tweets = _discover_tweets_via_search(screen_name, since_date=since_date)
+    all_tweets = _discover_tweets_via_search(
+        screen_name,
+        since_date=since_date,
+        provider=provider,
+    )
 
     if not all_tweets:
         logger.warning(f"{log_prefix} Advanced Search 无结果，尝试 UserTimeline 接口")
-        # Fallback to User Last Tweets API
-        # Note: response structure is {data: {tweets: [...]}} not {tweets: [...]}
+        # Fallback to User Last Tweets API.
+        # TwitterAPI.io nests tweets under data; Xquik returns them at top level.
         all_tweets = []
         seen_ids = set()
+        seen_cursors = set()
         cursor = ""
         page = 0
         while page < 500:
             page += 1
-            resp = get_user_last_tweets(screen_name, cursor=cursor)
+            resp = provider.get_user_last_tweets(
+                screen_name,
+                cursor=cursor,
+                since_date=since_date,
+            )
             if not resp:
                 break
-            # User Last Tweets wraps data in resp.data.tweets
-            inner = resp.get("data", resp)
-            raw_tweets = (
-                inner.get("tweets", [])
-                if isinstance(inner, dict)
-                else resp.get("tweets", [])
-            )
-            if not raw_tweets:
-                break
+            raw_tweets = _timeline_tweets(resp)
             new_count = 0
             for raw in raw_tweets:
                 tid = raw.get("id", "")
                 if tid and tid not in seen_ids:
                     seen_ids.add(tid)
-                    all_tweets.append(parse_api_tweet(raw))
+                    all_tweets.append(provider.parse_api_tweet(raw))
                     new_count += 1
             logger.info(
                 f"{log_prefix} UserTimeline 第 {page} 页: "
                 f"+{new_count} 新 (累计 {len(all_tweets)})"
             )
-            if new_count == 0:
-                break
             has_next = resp.get("has_next_page", False)
             next_cursor = resp.get("next_cursor", "")
             if not has_next or not next_cursor:
                 break
+            if next_cursor in seen_cursors:
+                logger.warning(f"{log_prefix} UserTimeline 返回重复 cursor，停止")
+                break
+            seen_cursors.add(next_cursor)
             cursor = next_cursor
             time.sleep(0.5)
 
@@ -888,7 +871,11 @@ async def fetch_api_user_tweets(profile_url: str) -> dict:
 
     # 8. Save batch record
     list_path = _save_batch_record(
-        result["tweet_list"], screen_name, since_date, prefix="api"
+        result["tweet_list"],
+        screen_name,
+        since_date,
+        prefix=provider.cache_prefix,
+        provider_label=provider.label,
     )
 
     logger.info(

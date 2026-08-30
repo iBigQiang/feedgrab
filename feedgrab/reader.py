@@ -685,14 +685,21 @@ class UniversalReader:
                 "账号推文批量抓取未启用。请在 .env 中设置 X_USER_TWEETS_ENABLED=true"
             )
 
-        # Check if full API path is requested (server deployment)
+        # Check if a full paid API path is requested (server deployment)
         from feedgrab.config import x_api_provider
-        if x_api_provider() == "api":
-            from feedgrab.config import twitterapi_io_key
-            if not twitterapi_io_key():
+        api_provider = x_api_provider()
+        if api_provider in ("api", "xquik"):
+            from feedgrab.fetchers.twitter_paid_provider import (
+                load_paid_provider,
+                provider_has_credentials,
+                provider_key_name,
+            )
+            provider = load_paid_provider(api_provider)
+            if not provider_has_credentials(api_provider):
+                key_name = provider_key_name(api_provider)
                 raise ValueError(
-                    "X_API_PROVIDER=api 但 TWITTERAPI_IO_KEY 未配置。\n"
-                    "请在 .env 中设置 TWITTERAPI_IO_KEY=xxx\n"
+                    f"X_API_PROVIDER={api_provider} 但 {key_name} 未配置。\n"
+                    f"请在 .env 中设置 {key_name}=xxx\n"
                     "或改回 X_API_PROVIDER=graphql 使用免费 GraphQL 方案"
                 )
 
@@ -704,7 +711,7 @@ class UniversalReader:
                 filtered_info = f", 互动过滤: {result['filtered']}"
 
             summary = (
-                f"账号推文批量抓取完成 (via TwitterAPI.io)\n"
+                f"账号推文批量抓取完成 (via {provider.label})\n"
                 f"总数: {result['total']}, 成功: {result['fetched']}, "
                 f"跳过: {result['skipped']}, 失败: {result['failed']}"
                 f"{filtered_info}\n"
