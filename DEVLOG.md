@@ -2,6 +2,51 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-08-31 · 桌面端 v0.1.23 · 线程回复修复随安装包发布
+
+### 背景
+
+`fa40579b`（线程抓取不再把「别人的回复」替换成根推内容）只推了源码，刚发布的
+`desktop-v0.1.22-20260831` 安装包里仍是旧 worker——而这个 bug 恰恰是用户用 v0.1.22 抓书签时报出来的：
+抓「别人在某 thread 下的回复」会把正文写成根推、被收藏那条的内容丢失。影响面还不止书签，
+`_fetch_via_graphql` 无条件先跑 thread，粘贴单条推文链接抓取同样中招。故递增版本号重新打包发布。
+
+### 实施
+
+- `desktop/package.json` 与 `package-lock.json` 版本递增到 `0.1.23`（两处 `version` 同步）。
+- 无 GUI 改动，本版内容即 `fa40579b` 的修复随安装包分发。
+- `npm run pack:user` 完整三步（build → runtime:build → package-windows.ps1）退出码 0。
+
+### 验证结果
+
+- 桌面端：`npm test` 83 passed（5 文件）；`npm run lint` 通过（`--max-warnings=0`）；`npm run build` 通过。
+- Python：全量 442 passed；service + worker + service_layer 106 passed。
+- **安装包内 worker 的功能级验证**（本次比 v0.1.22 更进一步）：v0.1.22 那次用 `detect_platform`
+  协议验路由即可，但线程修复改的是抓取内容，路由探针验不到。这次改为驱动打包产物里的
+  `feedgrab-worker.exe`，用它的 `fetch` 协议**真抓那条出问题的回复**，并通过 `output_dir` 参数
+  把产物写到临时目录（`OBSIDIAN_VAULT` 显式清空，不污染笔记库）。返回结果：
+
+  | 检查项 | 结果 |
+  |---|---|
+  | `source` | `https://x.com/ClockWorkMe/status/2019060923751632901` ✅ |
+  | `author` | `@ClockWorkMe`（不是根推作者 @LaoVStories）✅ |
+  | 正文首行 | `@iBigQiang @LaoVStories 红的是ATM提款卡，塞ATM里取钱` ✅ |
+  | 未被替换成根推正文 | ✅ |
+
+  三项全过，确认修复确实进了安装包，而不是只改了源码。
+
+### 桌面端 0.1.23 发布
+
+- 安装包大小：`381046375` bytes；SHA256：`8563BCD4344D87CAEDA0F545AD4AA988CCDBBAC9734CB0447E9DF81D8F28B0EF`；未签名；打包时间 2026-08-31 22:21 +08:00。
+- GitHub Release：`desktop-v0.1.23-20260831`（target `feedgrab-desktop`，`draft=false`），asset `state=uploaded`，`browser_download_url` 经 `curl.exe -I -L` 核验 302 → `200 OK`、`Content-Length: 381046375` 与本地一致。
+- 同步更新 `desktop/README.md` → 覆盖根 `README.md`（`Compare-Object` 无输出）、`README_en.md` 下载入口、`docs/feedgrab-desktop-packaging.md` 发布信息表。
+- Release notes 里额外写明：旧版本抓过的「别人的回复」那些 md 正文是错的，给出「删文件 + 从 `X/index/item_id_url.json` 移除 item_id + 重抓」的自助修正步骤。
+- v0.1.22 用户可直接在客户端左下角点击「更新」升级到本版本。
+
+### 状态：已完成 ✅
+
+---
+
 ## 2026-08-31 · v0.25.2 · 线程抓取不再把「别人的回复」替换成根推内容
 
 ### 背景
