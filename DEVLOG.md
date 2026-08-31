@@ -2,6 +2,48 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-08-31 · 桌面端 v0.1.22 · X 权限修复随安装包发布
+
+### 背景
+
+`e66f6465`（X 全渠道权限实测 + 账号私有渠道锁主账号）只推了源码，已发布的 `desktop-v0.1.21-20260831` 安装包里仍是旧 worker。其中一条属于**平台变更打坏了现有功能**、不是新特性没跟上：X 已把书签总览页从 `/i/bookmarks` 迁到 `/i/history`，v0.1.21 的 worker 不认识这个地址，用户从浏览器复制粘贴进客户端会被当成单条推文解析失败；而 GUI 输入框的示例文案还写着已经失效的 `/i/bookmarks/<id>`，等于在引导用户用一个不通的地址。故本次递增版本号重新打包发布。
+
+### 实施
+
+- `desktop/package.json` 版本递增到 `0.1.22`；`package-lock.json` 的两处 `version` 仍停在上上个版本 `0.1.20`（v0.1.21 发布时漏同步），本次一并补到 `0.1.22`。
+- 无源码改动，本版内容即 `e66f6465` 的全部修复随安装包分发。
+- `npm run pack:user` 完整三步（build → runtime:build → package-windows.ps1）退出码 0，Python worker 与 Chromium runtime 均为本次重建。
+
+### 验证结果
+
+- 桌面端：`npm test` 83 passed（5 个测试文件）；`npm run lint` 通过（`--max-warnings=0`）；`npm run build` 通过（typecheck + vite build + electron tsc）。
+- Python：`pytest tests/ -q` 全量 436 passed；`test_service_desktop.py` + `test_worker_protocol.py` + `test_service_layer.py` 共 106 passed。
+- **安装包内 worker 的功能级验证**（本次新增的做法）：`grep` 打包产物搜不到新函数名——PyInstaller 把 Python 代码 zlib 压缩进 PYZ 归档，明文搜索本来就无效，据此判断"worker 是旧的"会误判。改为**直接运行打包产物里的 `feedgrab-worker.exe`**，用它的 `detect_platform` 协议方法喂 6 条 URL：
+
+  | URL | 返回 | 说明 |
+  |-----|------|------|
+  | `/i/history` | `twitter_bookmarks` | 新逻辑；旧 worker 返回 `twitter` |
+  | `/i/history/bookmarks/<id>` | `twitter_bookmarks` | 新逻辑 |
+  | `/i/bookmarks` | `twitter_bookmarks` | legacy 回归 |
+  | `/i/history/views` | `twitter` | 精确匹配，没被前缀吞掉 |
+  | `www.x.com/<user>/status/<id>/likes` | `twitter_tweet_user_list` | 子域组修复 |
+  | `x.com/<user>/status/<id>/retweets` | `twitter_tweet_user_list` | 公开渠道回归 |
+
+  这条验证针对的是打包环节最常见的坑：跳过 `runtime:build` 会让安装包带着旧 worker，而所有源码级测试都照常通过、发现不了。
+
+- 命令行侧真实抓取（同一份 worker 代码）：点赞者 194 用户（主账号 5 页）、转推者 47 用户（`[6/6 可用]` 轮换）、`www.` 子域地址 194 用户（修复前必抛 `ValueError`）。
+
+### 桌面端 0.1.22 发布
+
+- 安装包大小：`381047157` bytes；SHA256：`3061EC73C4A4A9740935523B78CF3BA890CCFBBC45BAD77612C0E72F4B269DB7`；未签名；打包时间 2026-08-31 17:59 +08:00。
+- GitHub Release：`desktop-v0.1.22-20260831`（target `feedgrab-desktop`，`draft=false`），asset `state=uploaded`，`browser_download_url` 经 `curl.exe -I -L` 核验 302 → `200 OK`、`Content-Length: 381047157` 与本地文件一致。
+- 同步更新 `desktop/README.md` → 覆盖根 `README.md`（`Compare-Object` 无输出）、`README_en.md` 下载入口、`docs/feedgrab-desktop-packaging.md` 发布信息表。
+- v0.1.21 用户可直接在客户端左下角点击「更新」升级到本版本。
+
+### 状态：已完成 ✅
+
+---
+
 ## v0.25.1 · 2026-08-31 · X 全渠道权限实测 + 账号私有渠道锁主账号
 
 ### 背景

@@ -4,8 +4,8 @@ feedgrab Desktop 是 feedgrab 的 Windows 图形客户端分支，面向不想�
 
 ## 下载入口
 
-- Windows 安装包直链：[feedgrab-desktop-setup-0.1.21.exe](https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.21-20260831/feedgrab-desktop-setup-0.1.21.exe)
-- 发布页：[desktop-v0.1.21-20260831](https://github.com/iBigQiang/feedgrab/releases/tag/desktop-v0.1.21-20260831)
+- Windows 安装包直链：[feedgrab-desktop-setup-0.1.22.exe](https://github.com/iBigQiang/feedgrab/releases/download/desktop-v0.1.22-20260831/feedgrab-desktop-setup-0.1.22.exe)
+- 发布页：[desktop-v0.1.22-20260831](https://github.com/iBigQiang/feedgrab/releases/tag/desktop-v0.1.22-20260831)
 - 当前桌面客户端分支：[feedgrab-desktop](https://github.com/iBigQiang/feedgrab/tree/feedgrab-desktop)
 - 分支源码压缩包：[feedgrab-desktop.zip](https://github.com/iBigQiang/feedgrab/archive/refs/heads/feedgrab-desktop.zip)
 
@@ -13,21 +13,21 @@ feedgrab Desktop 是 feedgrab 的 Windows 图形客户端分支，面向不想�
 
 | 文件 | 适合对象 | 说明 |
 | --- | --- | --- |
-| `feedgrab-desktop-setup-0.1.21.exe` | 普通用户 | 双击安装，自动创建开始菜单和桌面快捷方式。 |
+| `feedgrab-desktop-setup-0.1.22.exe` | 普通用户 | 双击安装，自动创建开始菜单和桌面快捷方式。 |
 
-本次安装包来自 `feedgrab-desktop` 分支，打包时间 / 构建时间 `2026-08-31 02:01`，签名状态：未签名。本地文件 SHA256：
+本次安装包来自 `feedgrab-desktop` 分支，打包时间 / 构建时间 `2026-08-31 17:59`，签名状态：未签名。本地文件 SHA256：
 
 ```text
-9808237802EFB3668F7E3A1D42826CA0F7782A977B72BC68C672AD3D095CC9CE
+3061EC73C4A4A9740935523B78CF3BA890CCFBBC45BAD77612C0E72F4B269DB7
 ```
 
-上方下载地址来自 GitHub API 返回的 `browser_download_url`，已用 `curl.exe -I -L` 核验，最终返回 `200 OK`，文件大小 `381038607` bytes。
+上方下载地址来自 GitHub API 返回的 `browser_download_url`，已用 `curl.exe -I -L` 核验，最终返回 `200 OK`，文件大小 `381047157` bytes。
 
 开发者/便携版可在本地运行 `npm run pack:dev` 或 `npm run pack:all` 生成。后续每次重新打包正式安装包都会递增桌面端小版本号，避免多个安装包都显示同一个版本。
 
 ## 安装与启动
 
-1. 从 GitHub Releases 下载 `feedgrab-desktop-setup-0.1.21.exe`。
+1. 从 GitHub Releases 下载 `feedgrab-desktop-setup-0.1.22.exe`。
 2. 双击安装包，按提示选择安装目录。
 3. 安装完成后，通过桌面快捷方式或开始菜单启动 `feedgrab Desktop`。
 4. 首次启动后进入“诊断”页面，确认 Python、feedgrab 包、Playwright/Patchright、Chromium、Node.js、Electron、输出目录和登录态目录状态。
