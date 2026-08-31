@@ -210,12 +210,17 @@ async def fetch_user_tweets(
             fetch_with_cookie_rotation,
             count_total_accounts,
         )
+        # Likes are readable by the account itself only: measured 2026-08-31,
+        # a spare account gets `user.result.timeline: {}` for someone else's
+        # likes, and even the primary account gets it for a third party. So
+        # rotating can only ever lose the one account that might work.
         response, rotated_cookies = fetch_with_cookie_rotation(
             page_fetcher,
             user_id,
             label=mode_label,
             network_retry_delay=5.0,
             cursor=cursor,
+            primary_only=(mode == "likes"),
         )
         # Update working cookies for subsequent pages (best-effort, rotation persists)
         if rotated_cookies:
@@ -233,8 +238,11 @@ async def fetch_user_tweets(
             # v0.22.0: friendly message for likes/replies when content is private
             if mode == "likes" and page == 0:
                 logger.warning(
-                    f"[{mode_label}] @{screen_name} 的喜欢列表为空 — "
-                    f"该用户可能将其 Likes 设为私密（Twitter 默认行为）"
+                    f"[{mode_label}] >>> @{screen_name} 的喜欢列表为空 <<< "
+                    f"X 已将点赞列表私有化：只有 @{screen_name} 本人的登录态能读到"
+                    f"自己的 Likes，用别的账号（含本工具的主账号）抓必然返回空。"
+                    f"若 @{screen_name} 就是你自己，请确认 sessions/twitter.json "
+                    f"是该账号的登录态：feedgrab login twitter"
                 )
             else:
                 logger.info(

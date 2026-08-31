@@ -6,7 +6,7 @@ feedgrab 是一个万能内容抓取器，从任意平台抓取内容并输出�
 
 - **仓库**：https://github.com/iBigQiang/feedgrab
 - **作者**：[@iBigQiang](https://github.com/iBigQiang)（强子手记）
-- **当前版本**：v0.25.0
+- **当前版本**：v0.25.1
 - **Python**：≥3.10
 - **许可证**：MIT
 
@@ -232,6 +232,26 @@ UserTweets API 受服务端限制（~800条），通过 Playwright 浏览器按�
 
 `sessions/` 目录支持多个 Cookie 文件（`twitter.json` + `x_2.json` + `x_3.json`...），GraphQL 429 时自动切换到未限流账号，15 分钟冷却后恢复。
 
+### X 渠道权限边界与主账号锁定（`twitter_cookies.py`）
+
+轮换只对**公开**数据有意义。账号私有渠道只有唯一一个登录态读得到，轮换过去只会丢掉那个唯一可能成功的账号。2026-08-31 实测（主号 `@iBigQiang` vs 备用号 `x_2.json`）确认 X 有**三级**权限边界：
+
+| 渠道 | 边界 | 机制 |
+|------|------|------|
+| 书签（`/i/history`、`/i/history/bookmarks/<id>`） | 账号本人 | `primary_only=True` |
+| 用户 likes（`/<user>/likes`） | **账号本人** | `primary_only=True`；备用号抓公开主页的 likes 也是空 timeline |
+| favoriters（`/status/<id>/likes`、`x-favoriters`） | **推文作者本人** | `primary_only=True`；对第三方 12817 赞推文实测，非作者账号一律空 timeline |
+| retweeters（`/status/<id>/retweets`、`x-retweeters`） | 公开 | 保持轮换 |
+| 单贴 / 长文 / 账号批量 / replies / 列表 / 列表成员 / followers / following / 关键词搜索 / 人物搜索 | 公开 | 保持轮换 |
+
+实现三件套：`is_primary_cookie_label()` 判定主账号（`env` / `playwright(twitter.json)` / `cookie_file(x.json)` / `chrome_cdp` 为主号，`x_2`~`x_6` / `twitter_2` 为备用号）；`load_primary_twitter_cookies()` **只**返回主账号，绝不降级到备用号；`fetch_with_cookie_rotation(primary_only=True)` 单发不轮换，无主账号时连请求都不发。
+
+**闸门只有一个判据**：`twitter_retweeters.mode_requires_primary(mode)` 读 `_MODE_CONFIG`，`reader.py` 的 `_read_tweet_user_list` 与 `cli.py` 的 `cmd_twitter_tweet_user_list` **共用**它 —— 两个入口都在缺主账号时前置 `RuntimeError` / 中文指引，不拿备用号白跑一趟拿空结果。未知 mode 保守要主账号。新增 author-only 渠道只改 `_MODE_CONFIG` 一处即可，不要在调用点重写 mode 名。
+
+两个易漏的边界：① `parse_tweet_user_list_url` 必须带 `(?:[\w-]+\.)?` 子域组 —— `_detect_platform` 只看 domain 含 `x.com`，`www.x.com` / `mobile.twitter.com` 会照常路由进来，正则漏了子域就解析成 `(None, None)`，闸门落空且功能整条 `ValueError`。② 钉死单账号后没有可跳的对象，`load_twitter_cookies()` 的"跳过限流账号"逻辑失效，必须显式查 `cookie_rate_limit_remaining()`：冷却期内直接终止不发那个必然 429 的请求，失败归因分「本次触发限流（登录态没问题，等冷却）」与「无响应（请检查登录态是否过期）」两支，别把 15 分钟冷却报成"登录态已过期"。
+
+**空结果的正确归因**：likes / favoriters 为空意味着「你不是本人/作者」，**不是**「对方隐藏了列表」——X 只把这两个列表暴露给唯一一个账号。此前代码文案把平台机制说成对方的隐私设置，会误导用户去调设置，已修正。
+
 ### 输出格式
 
 每条内容 → 独立 `.md` 文件，按平台分目录（`X/`、`XHS/`、`LinuxDo/`、`mpweixin/`、`YouTube/` 等），Obsidian 兼容 YAML front matter（title/source/author/published/likes/tags 等）。
@@ -434,6 +454,7 @@ yt-dlp 默认只启用 deno。`_js_runtime_args()` 自动检测 deno/node/bun �
 
 | 版本 | 功能 |
 |------|------|
+| v0.25.1 | X 全渠道权限实测 + 账号私有渠道锁主账号：18 项渠道 × 2 账号交叉实测确认三级边界（公开 → 账号本人 → 推文作者本人），用户 likes / favoriters 改走 `primary_only=True`，retweeters / 单贴 / 长文 / 列表 / 搜索等公开渠道保持轮换；缺主账号时 reader 与 CLI 前置硬失败，闸门判据统一到 `mode_requires_primary()`（`_MODE_CONFIG` 单一来源）；`parse_tweet_user_list_url` 兼容 `www.` / `mobile.` 子域；主账号被限流时区分「限流冷却」与「登录态过期」两种归因；修复书签 URL 路由（X 已迁到 `/i/history`，legacy `/i/bookmarks` 仍解析，路由与解析统一用 `[0-9]`）；修正两处把平台机制误说成对方隐私设置的文案；10 项渠道端到端实测全部落地；测试 390 → 436 passed |
 | v0.25.0 | 第一阶段 service layer 架构升级：新增 `feedgrab/service/` 的结构化 API（models / FetchService / Output / Login / Settings / Doctor / Job），CLI 单 URL 和 MCP 入口改为共用 `FetchService`，保持终端命令、Markdown 输出、去重索引和 session 格式兼容；修复 MP 后台 session 失效错误被掩盖问题；FlowUs 在线图片模式改为写入可预览的 `cdn2.flowus.cn` 签名 URL，本地模式仍通过 `FLOWUS_DOWNLOAD_IMAGES=true` 下载 `attachments/`；测试 210 passed |
 | v0.21.0 | 新增「知识星球」（Zsxq）平台支持（articles.zsxq.com 长文章 + wx.zsxq.com 短帖 + t.zsxq.com 短链 302 解析）；4 级 Tier 链路 + 五形态 topic 渲染（含 solution）+ 三态评论筛选 |
 | v0.20.1 | 修复 Twitter 长 thread 被误判为 Article 导致 quoted tweet 丢失（`schema.from_twitter` 改用 `_has_article_body` 看 article_data 实际内容） |

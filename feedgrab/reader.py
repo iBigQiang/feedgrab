@@ -40,8 +40,19 @@ class UniversalReader:
         if "mp.weixin.qq.com" in domain:
             return "wechat"
         if "x.com" in domain or "twitter.com" in domain:
-            # Bookmark URLs: x.com/i/bookmarks or x.com/i/bookmarks/{folderId}
-            if "/i/bookmarks" in path:
+            # Bookmark URLs. X moved the overview from /i/bookmarks to
+            # /i/history, which also turned the folder form into
+            # /i/history/bookmarks/{folderId}. Both spellings still resolve, and
+            # a bare /i/history IS the bookmarks overview — match it explicitly
+            # rather than by prefix, so a future /i/history/<something-else>
+            # subpage is not silently swallowed as a bookmark URL.
+            # [0-9] rather than \d on purpose: \d also matches Arabic-Indic and
+            # other Unicode digits, which _parse_bookmark_url ([0-9]+) would not
+            # capture — the folder id would vanish and a folder request would
+            # silently become "all bookmarks".
+            if "/i/bookmarks" in path or re.match(
+                r'^/i/history(?:/bookmarks(?:/[0-9]+)?)?/?$', path
+            ):
                 return "twitter_bookmarks"
             # v0.22.0: List members / subscribers — must come BEFORE list-tweets check
             if re.match(r'^/i/lists/\d+/members/?$', path):
@@ -616,12 +627,21 @@ class UniversalReader:
             )
 
         from feedgrab.fetchers.twitter_bookmarks import fetch_bookmarks
-        from feedgrab.fetchers.twitter_cookies import load_twitter_cookies, has_required_cookies
+        from feedgrab.fetchers.twitter_cookies import (
+            load_primary_twitter_cookies,
+            has_required_cookies,
+        )
 
-        cookies = load_twitter_cookies()
+        # Bookmarks are account-private: rotating to a spare account (x_2.json ...)
+        # can only ever read that account's own bookmarks, so pin the primary one
+        # and fail loudly instead of silently degrading.
+        cookies = load_primary_twitter_cookies()
         if not has_required_cookies(cookies):
             raise RuntimeError(
-                "书签抓取需要 Twitter Cookie，请先运行: feedgrab login twitter"
+                "书签抓取需要主账号 Twitter 登录态（sessions/twitter.json）。\n"
+                "书签是账号私有数据，不能用备用号（x_2.json 等）代抓，"
+                "换号只会读到那个账号自己的书签。\n"
+                "请先运行: feedgrab login twitter"
             )
 
         result = await fetch_bookmarks(url, cookies)
@@ -798,12 +818,21 @@ class UniversalReader:
             )
 
         from feedgrab.fetchers.twitter_user_tweets import fetch_user_tweets
-        from feedgrab.fetchers.twitter_cookies import load_twitter_cookies, has_required_cookies
+        from feedgrab.fetchers.twitter_cookies import (
+            load_primary_twitter_cookies,
+            has_required_cookies,
+        )
 
-        cookies = load_twitter_cookies()
+        # X privatised Likes: only the account itself can read its own likes.
+        # A spare account (x_2.json ...) returns an empty timeline, so pin the
+        # primary login instead of rotating into a guaranteed empty result.
+        cookies = load_primary_twitter_cookies()
         if not has_required_cookies(cookies):
             raise RuntimeError(
-                "用户喜欢抓取需要 Twitter Cookie，请先运行: feedgrab login twitter"
+                "用户喜欢抓取需要主账号 Twitter 登录态（sessions/twitter.json）。\n"
+                "X 已将点赞列表私有化，只有账号本人能读到自己的 Likes，"
+                "备用号（x_2.json 等）代抓只会拿到空列表。\n"
+                "请先运行: feedgrab login twitter"
             )
 
         # mode="likes" tells fetch_user_tweets to use Likes endpoint
@@ -871,14 +900,38 @@ class UniversalReader:
                 "推文用户列表抓取未启用。请在 .env 中设置 X_TWEET_USER_LIST_ENABLED=true"
             )
 
-        from feedgrab.fetchers.twitter_retweeters import fetch_tweet_user_list
-        from feedgrab.fetchers.twitter_cookies import load_twitter_cookies, has_required_cookies
+        from feedgrab.fetchers.twitter_retweeters import (
+            fetch_tweet_user_list,
+            mode_requires_primary,
+            parse_tweet_user_list_url,
+        )
+        from feedgrab.fetchers.twitter_cookies import (
+            load_twitter_cookies,
+            load_primary_twitter_cookies,
+            has_required_cookies,
+        )
 
-        cookies = load_twitter_cookies()
-        if not has_required_cookies(cookies):
-            raise RuntimeError(
-                "推文用户列表抓取需要 Twitter Cookie，请先运行: feedgrab login twitter"
-            )
+        # Favoriters is author-only (X shows likers to the tweet's author
+        # alone), so it needs the primary login; Retweeters is public and keeps
+        # rotating across spare accounts. The policy itself lives in
+        # twitter_retweeters._MODE_CONFIG — ask it rather than re-testing the
+        # mode name here, so a new author-only mode is gated automatically.
+        mode, _tweet_id = parse_tweet_user_list_url(url)
+        if mode_requires_primary(mode):
+            cookies = load_primary_twitter_cookies()
+            if not has_required_cookies(cookies):
+                raise RuntimeError(
+                    "点赞者抓取需要主账号 Twitter 登录态（sessions/twitter.json）。\n"
+                    "X 只允许推文作者本人查看谁点赞了自己的推文，"
+                    "备用号（x_2.json 等）代抓只会拿到空列表。\n"
+                    "请先运行: feedgrab login twitter"
+                )
+        else:
+            cookies = load_twitter_cookies()
+            if not has_required_cookies(cookies):
+                raise RuntimeError(
+                    "推文用户列表抓取需要 Twitter Cookie，请先运行: feedgrab login twitter"
+                )
 
         result = await fetch_tweet_user_list(url, cookies)
 

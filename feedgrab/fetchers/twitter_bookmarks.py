@@ -3,8 +3,10 @@
 Twitter/X Bookmarks batch fetcher — fetch all bookmarked tweets via GraphQL.
 
 Supports:
-    - feedgrab https://x.com/i/bookmarks          (all bookmarks)
-    - feedgrab https://x.com/i/bookmarks/{folderId} (specific folder)
+    - feedgrab https://x.com/i/history           (all bookmarks, current X URL)
+    - feedgrab https://x.com/i/bookmarks          (all bookmarks, legacy URL)
+    - feedgrab https://x.com/i/history/bookmarks/{folderId} (folder, current)
+    - feedgrab https://x.com/i/bookmarks/{folderId} (folder, legacy)
 
 Design (Approach B — hybrid):
     - Extract tweet data directly from bookmark API response (no extra API call)
@@ -83,11 +85,25 @@ def _parse_bookmark_url(url: str) -> Dict[str, str]:
     Returns:
         dict with 'type' ('all' or 'folder') and optional 'folder_id'
     """
-    # https://x.com/i/bookmarks/2015311287715340624
-    match = re.search(r'/i/bookmarks(?:/(\d+))?', url)
+    # https://x.com/i/history/bookmarks/2015311287715340624  (current X form)
+    # https://x.com/i/bookmarks/2015311287715340624           (legacy form)
+    # A bare /i/history or /i/bookmarks carries no folder id and falls through
+    # to type="all", which is exactly the bookmarks overview.
+    match = re.search(r'/i/(?:history/)?bookmarks(?:/([0-9]+))?', url)
     if match and match.group(1):
         return {"type": "folder", "folder_id": match.group(1)}
     return {"type": "all", "folder_id": ""}
+
+
+def _graphql_error_summary(response: Dict[str, Any]) -> str:
+    """Join GraphQL error messages from a bookmark response ('' when none).
+
+    Twitter returns HTTP 200 + a non-empty ``errors`` array for permission
+    failures, so a truthy response is NOT proof that content was returned.
+    """
+    errors = (response or {}).get("errors") or []
+    msgs = [str(e.get("message", "")).strip() for e in errors]
+    return "; ".join(m for m in msgs if m)
 
 
 def _sanitize_folder_name(name: str) -> str:
@@ -432,32 +448,59 @@ async def fetch_bookmarks(bookmark_url: str, cookies: dict) -> dict:
     for page in range(max_pages):
         logger.info(f"[Bookmarks] 获取第 {page + 1} 页...")
 
-        from feedgrab.fetchers.twitter_cookies import (
-            fetch_with_cookie_rotation,
-            count_total_accounts,
-        )
+        from feedgrab.fetchers.twitter_cookies import fetch_with_cookie_rotation
+        # primary_only: bookmarks are account-private, so a spare account can
+        # never serve this request — rotating past the primary only wastes
+        # requests and hides the real "please re-login" cause.
         if folder_id:
             response, rotated_cookies = fetch_with_cookie_rotation(
                 fetch_bookmark_folder_page, folder_id,
-                label="Bookmarks", cursor=cursor,
+                label="Bookmarks", cursor=cursor, primary_only=True,
             )
         else:
             response, rotated_cookies = fetch_with_cookie_rotation(
                 fetch_bookmarks_page,
-                label="Bookmarks", cursor=cursor,
+                label="Bookmarks", cursor=cursor, primary_only=True,
             )
         if rotated_cookies:
             cookies = rotated_cookies
         if not response:
-            total_accounts = count_total_accounts()
+            # A dead first page means nothing was fetched at all — that is a hard
+            # failure, not "read to the end". Returning total=0 here is what made
+            # an expired login look like a successful empty run.
+            if not all_tweet_entries:
+                raise RuntimeError(
+                    "书签抓取失败：主账号请求无响应（常见原因是登录态过期，"
+                    "GraphQL 返回 401/403）。书签是账号私有数据，不会轮换备用号，"
+                    "请重新登录该账号：feedgrab login twitter"
+                )
             logger.error(
-                f"[Bookmarks] >>> 第 {page + 1} 页所有 {total_accounts} 个账号均失败 <<< "
+                f"[Bookmarks] >>> 第 {page + 1} 页主账号请求失败 <<< "
                 f"已抓取 {len(all_tweet_entries)} 条，停止分页"
+                f"（书签为账号私有数据，不会轮换备用号）"
             )
             break
 
         entries, cursors = parse_bookmark_entries(response)
         if not entries:
+            # "拿到响应" != "拿到内容"：权限等错误走 HTTP 200 + errors 返回，
+            # 不能与「正常读完」合并，否则静默上报成功（总数 0）
+            err_summary = _graphql_error_summary(response)
+            if err_summary:
+                hint = ""
+                if "not authorized" in err_summary.lower():
+                    hint = (
+                        " 提示：书签是账号私有数据，轮换到其他账号读不到同一份书签；"
+                        "请确认当前生效账号正是收藏这些推文的账号"
+                        "（书签文件夹还需该账号具备 X Premium 权限）。"
+                    )
+                if all_tweet_entries:
+                    logger.error(
+                        f"[Bookmarks] >>> 第 {page + 1} 页返回错误 <<< {err_summary}"
+                        f"（已抓取 {len(all_tweet_entries)} 条，停止分页）{hint}"
+                    )
+                    break
+                raise RuntimeError(f"书签抓取失败：{err_summary}{hint}")
             logger.info("[Bookmarks] 没有更多书签条目")
             break
 

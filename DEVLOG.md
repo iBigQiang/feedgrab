@@ -2,6 +2,144 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## v0.25.1 · 2026-08-31 · X 全渠道权限实测 + 账号私有渠道锁主账号
+
+### 背景
+
+书签批量此前已锁主账号（备用号代抓拿不到别人的书签）。用户要求把 **x.com 全部渠道**逐一核验一遍，
+找出还有哪些属于"必须主账号权限"，做成和书签一样锁定 `sessions/twitter.json`；不强调权限的公开页面
+继续走小号轮换。明确要求：**不要猜测，用真实抓取验证**。
+
+方案文档：`docs/开发及迭代方案调研报告/2026-08-31_X平台全渠道权限实测与主账号锁定方案.md`
+
+### 实测方法与两个必须排除的伪信号
+
+18 项渠道 × 2 个账号（主号 `@iBigQiang` / 备用号 `x_2.json` = `@nuklein`）交叉实测。过程中踩到两个坑，
+都会把"有权限"误判成"无权限"：
+
+**伪信号 1 — 探针结构误判**：`TweetResultByRestId` 返回 `data.tweetResult`，结构里**没有 `entryId`**。
+第一版探针按 entryId 计数，把单贴 / 长文误报为 EMPTY。改用递归查找 `full_text` 判定后，两者实际都正常。
+
+**伪信号 2 — 无数据 ≠ 无权限**：`TimelineTerminateTimeline` / `timeline: {}` 只说明"没内容返回"，
+可能仅仅是那条推文转推数为 0。必须**先确认目标本身有数据**再归因。做法：从列表 timeline 提取
+`favorite_count` / `retweet_count` 排序，挑出高互动的第三方推文（@rehan_shei，12817 赞 / 995 转）重测——
+结论随即翻转：retweeters 主号小号都拿到 20 条（公开），favoriters 连主号也是空（作者本人限定）。
+
+### 实测确认的三级权限边界
+
+| 渠道 | 边界 | 交叉实测 |
+|------|------|---------|
+| 书签 | 账号本人 | 已有结论，本轮沿用 |
+| 用户 likes（`/<user>/likes`） | **账号本人** | 我的 likes：主号 OK 20 / 小号 EMPTY；别人的 likes：主号也 EMPTY |
+| favoriters（`/status/<id>/likes`） | **推文作者本人** | 我的推文：主号 OK 20 / 小号 EMPTY；别人 12817 赞推文：主号也 EMPTY |
+| retweeters（`/status/<id>/retweets`） | **公开** | 别人 995 转推文：主号 OK 20 / 小号 OK 20 |
+| 单贴 / 长文 / 账号批量 / 列表 / 列表成员 / 关注列表 / 关键词搜索 / 人物搜索 | **公开** | 主号小号均正常 |
+
+即：X 有三级权限边界 —— 公开（任何登录态） → 账号本人（likes） → 推文作者本人（favoriters）。
+对后两者做轮换，只会丢掉唯一可能成功的那个账号。
+
+### 前置基础设施（同批改动，此前未记录）
+
+本轮之前已为「书签锁主账号」铺的底座，与上述改动同批提交：
+
+- `twitter_cookies.py`：新增主账号语义三件套 —— `_PRIMARY_SOURCE_LABELS` 白名单、
+  `is_primary_cookie_label()`（`env` / `playwright(twitter.json)` / `cookie_file(x.json)` / `chrome_cdp`
+  算主账号，`x_2`~`x_6` / `twitter_2` 算备用号）、`load_primary_twitter_cookies()`（**只**返回主账号，
+  绝不降级到备用号）、`fetch_with_cookie_rotation(primary_only=True)`（单发不轮换；无主账号时连请求都不发）
+- `twitter_bookmarks.py`：书签两条分页路径均改 `primary_only=True`；`_parse_bookmark_url` 正则
+  升级为 `/i/(?:history/)?bookmarks(?:/([0-9]+))?` 兼容新旧两种拼写；新增 `_graphql_error_summary()`，
+  主账号请求失败时给出"登录态过期"的明确指引而不是静默 0 条
+- `twitter_graphql.py`：① 登录态首页与游客登录墙分两个缓存槽
+  （只有已登录页带 transaction-id 签名器需要的 `ondemand.s` manifest，混用会导致签名失败）；
+  ② `BookmarkFolders` 的 HTTP 200 + 非空 `errors` 数组显式报错 —— X 用这种形式返回权限失败，
+  结构上 `data` 合法但为空，此前会静默退化成"0 个文件夹"
+- `cli.py`：`_harden_stdout_encoding()` 对 stdout/stderr 做 `reconfigure(errors="replace")`，
+  修 GBK 控制台下 emoji `print()` 抛 `UnicodeEncodeError` 把"请重新登录"提示变成崩溃的问题；
+  `doctor x` 按角色分列主账号 / 备用号，主账号缺失时直接 fail 并提示 `feedgrab login twitter`
+
+### 实施
+
+**1. likes 锁主账号**（`twitter_user_tweets.py`）
+`fetch_with_cookie_rotation(..., primary_only=(mode == "likes"))`，`tweets` / `replies` 不受影响仍轮换。
+
+**2. favoriters 锁主账号**（`twitter_retweeters.py`）
+`_MODE_CONFIG` 新增 `primary_only` 字段：`favoriters=True` / `retweeters=False`，配实测依据注释。
+
+**3. reader 层前置硬失败**（`reader.py`）
+`_read_user_likes` / `_read_tweet_user_list(mode=favoriters)` 先 `load_primary_twitter_cookies()`，
+缺主账号直接 `RuntimeError` 并解释"为什么备用号没用"，不再拿备用号白跑一趟拿空结果。
+retweeters 保持 `load_twitter_cookies()` 轮换。
+
+**4. 修正两处错误归因文案**
+- `twitter_user_tweets.py`：原"该用户可能将其 Likes 设为私密（Twitter 默认行为）" → 改为"X 已将点赞列表私有化，只有本人登录态能读"
+- `twitter_retweeters.py`：原"可能作者隐藏了点赞列表" → 改为"X 只把点赞者列表展示给推文作者本人"
+
+两处原文案把平台机制说成了对方的隐私设置，会误导用户去调设置。
+
+**5. 修复书签 URL 路由缺陷**（`reader.py → _detect_platform`）
+X 已把书签总览从 `/i/bookmarks` 迁到 `/i/history`（文件夹形态同步变成 `/i/history/bookmarks/<id>`），
+裸 `/i/history` 此前不被识别为书签 URL。用精确正则 `^/i/history(?:/bookmarks(?:/[0-9]+)?)?/?$` 匹配，
+而非前缀匹配 —— 避免未来 `/i/history/<其他子页>` 被静默吞成书签 URL。legacy `/i/bookmarks` 继续解析。
+用 `[0-9]` 而非 `\d`：`\d` 还会匹配阿拉伯-印度数字，而 `_parse_bookmark_url` 用的是 `[0-9]+`，
+两边口径不一致会让「抓某个文件夹」静默变成「抓全部书签」。
+
+### 端到端实测（10 项渠道，全部产物落地）
+
+| # | 渠道 | 结果 |
+|---|------|------|
+| 1 | 总书签 `/i/history`（新修路由） | ✅ 16/20 落地 `X/bookmarks/all/`，索引 11858→11874 |
+| 2 | 账号喜欢 `/likes`（新锁主账号） | ✅ 18 条落地 `X/likes_author/iBigQiang/`，索引 11874→11892 |
+| 3 | 点赞者 `/status/<id>/likes`（新锁主账号） | ✅ 39 个用户（主账号读自己推文） |
+| 4 | 转推者 `/status/<id>/retweets`（回归轮换） | ✅ 36 个用户 |
+| 5 | 单贴 | ✅ Tier 0 GraphQL 落地 |
+| 6 | 长文 Article | ✅ `content_state` 原生渲染落地 |
+| 7 | 列表批量 | ✅ 发现 94 / 新增 5 / dedup 跳过 89 / 失败 0 |
+| 8 | 书签文件夹批量 | ✅ 14/20 落地，索引 11958→11972 |
+| 9 | 账号批量 | ✅ 15/16 落地，索引 11977→11992 |
+| 10 | 词组批量搜（忽略过滤项） | ✅ 359 条 / 2 关键词 |
+
+单元测试 390 → **436 passed**（+46，三个文件均为本轮新建）：
+
+| 文件 | 例数 | 锁什么 |
+|------|------|--------|
+| `tests/test_twitter_primary_account.py` | 20 | 「哪些渠道钉主账号」这条策略本身：实测矩阵写进注释、`_spy_rotation` 断言 `primary_only` 传参、真实空响应形态构造器、空结果文案必须指向"作者本人"而非"作者隐藏" |
+| `tests/test_twitter_bookmarks_url.py` | 14 | 书签 URL 三形态（裸 `/i/history` / `/i/history/bookmarks` / 带文件夹 id）+ `/i/history/views` 不被吞 + 路由与解析对 folder id 的口径一致 |
+| `tests/test_twitter_primary_gate.py` | 12 | 闸门的**入口覆盖面**与**失败归因**：子域不绕过、`mode_requires_primary` 单一来源、CLI 与 reader 同一套闸门、限流不误诊成登录态过期、白名单锁生成侧真实 label |
+
+### 审查三关修复（code-review / security-review / verify 三轮回头改）
+
+推送前按 `/ship` 跑完三关，又改出 6 处。都是"第一版能跑但边界不对"的类型：
+
+| # | 问题 | 修复 |
+|---|------|------|
+| 1 | CLI `x-favoriters` 完全没有主账号闸门，缺主账号时用备用号发请求，打印"总数：0" —— 看起来像这条推文没人点赞 | `cli.py → cmd_twitter_tweet_user_list` 加与 reader 同一套闸门 + 同一套中文指引 |
+| 2 | `parse_tweet_user_list_url` 正则写死裸域，`www.x.com` / `mobile.twitter.com` 解析成 `(None, None)`；而 `_detect_platform` 只看 domain 含 `x.com` 照常放行 → 闸门落空、功能整条 `ValueError` | 两处正则加 `(?:[\w-]+\.)?` 子域组 |
+| 3 | `reader.py` 写死 `mode == "favoriters"` 判断要不要主账号，与 `_MODE_CONFIG` 两处真相 | 新增 `mode_requires_primary(mode)` 读 `_MODE_CONFIG`，reader / CLI 共用；未知 mode 保守要主账号 |
+| 4 | 主账号被限流时，`primary_only` 没有可轮换对象，请求必 429，上层只剩"无响应"一个信号 → 报成"登录态已过期"，误导用户重新登录 | 新增 `cookie_rate_limit_remaining()`；请求前查冷却直接终止，失败后按"本次触发限流（登录态没问题，等冷却）"/"无响应（请检查登录态）"分叉归因 |
+| 5 | 路由用 `\d`、`_parse_bookmark_url` 用 `[0-9]`，阿拉伯-印度数字的 folder id 会路由进书签但解析成 `type="all"` → "抓某个文件夹"静默变成"抓全部书签" | 路由统一 `[0-9]`，并补一例断言两侧口径一致 |
+| 6 | 桌面端输入框示例仍写 legacy `https://x.com/i/bookmarks/<id>` | `desktop/renderer/src/App.tsx` 改为 `/i/history/bookmarks/<id>`，并补一行"X 总书签批量：`https://x.com/i/history`" |
+
+修复后的三条真实抓取复验（不是跑测试，是真抓）：
+
+| 渠道 | 结果 |
+|------|------|
+| CLI `x-favoriters 2015088004109615266` | ✅ 主账号 `playwright(twitter.json)` / 5 页 / **194 用户** → `output\X\users\favoriters\2015088004109615266_2026-08-31.md` + `.csv` |
+| CLI `x-retweeters` 同一推文 | ✅ `load_twitter_cookies [6/6 可用]` / 2 页 / **47 用户**（确认公开渠道仍走轮换，没被闸门带走） |
+| `https://www.x.com/iBigQiang/status/2015088004109615266/likes` 走 reader 路由 | ✅ **194 用户**（修复前必抛 `ValueError: 无法识别推文用户列表 URL`） |
+
+安全审查结论：**无达到报告门槛的安全漏洞**。两条非安全观察已在上表第 3、5 项修掉。
+另有两条经核实驳回：`_fetch_home_html` 落盘缓存不含凭据值且 `sessions/` 已 gitignore、同目录本就有明文
+cookie，增量暴露为零；主/备账号选错的后果是空结果而非越权（授权由 X 服务端 ACL 执行，本地闸门只影响体验）。
+
+### 已知遗留（非本轮引入）
+
+- likes 尾部的 TwitterAPI.io 补充抓取路径报 `HTTP 402 Credits is not enough` —— 付费额度耗尽，
+  主链路结果不受影响，后续可考虑额度不足时跳过该 Tier 而非报错。
+- `twitter_graphql.py → _prompt_cookie_refresh_via_cdp()` 的 `print("⚠️ ...")` 在非 `cli.main()`
+  入口（MCP / service / 直接脚本）会因 GBK 编码崩溃。
+- 可选增强：把 `x.com/i/api/1.1/account/multi/list.json` 身份反查接入 `doctor x`，
+  让每个 cookie 槽位显示 `@screen_name` + 鉴权状态。
+
 ## 2026-08-31 · Reddit 图片在 Obsidian 不渲染修复 + REDDIT_DOWNLOAD_MEDIA
 
 ### 背景

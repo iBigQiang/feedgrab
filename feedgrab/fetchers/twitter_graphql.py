@@ -344,6 +344,10 @@ GRAPHQL_BASE = "https://x.com/i/api/graphql"
 _query_cache: Dict[str, Any] = {}
 _cache_timestamp: float = 0
 _cached_home_html: str = ""
+# Logged-in app shell is a DIFFERENT page from the guest login wall: only the
+# authenticated one carries the ondemand.s manifest the transaction-id signer
+# needs, so the two are cached in separate slots.
+_cached_home_html_authed: str = ""
 CACHE_TTL = 3600  # 1 hour
 
 # Cache for x-client-transaction-id generator
@@ -514,6 +518,26 @@ def fetch_bookmark_folders(cookies: dict) -> list:
 
     if not response or "data" not in response:
         logger.warning("[BookmarkFolders] API returned empty response")
+        return []
+
+    # X reports permission failures here as HTTP 200 + a non-empty ``errors``
+    # array, leaving ``data`` structurally valid but empty. Name that failure
+    # instead of letting it degrade into a silent "0 folders".
+    errors = response.get("errors") or []
+    if errors:
+        msgs = "; ".join(
+            str(e.get("message", "")).strip() for e in errors if e.get("message")
+        )
+        logger.error(
+            f"[BookmarkFolders] >>> 文件夹列表读取失败 <<< "
+            f"{msgs or '未知错误'}"
+        )
+        if "not authorized" in msgs.lower():
+            logger.error(
+                "[BookmarkFolders] 书签文件夹（bookmark collections）"
+                "需要当前登录账号具备 X Premium 权限，"
+                "且只能读取该账号自己的文件夹"
+            )
         return []
 
     data = response["data"]
@@ -1436,6 +1460,14 @@ def parse_bookmark_entries(response: Dict[str, Any]) -> tuple:
             .get("timeline", {})
             .get("instructions", [])
         )
+    # Path 2b: bookmark_collection_timeline — X renamed this field
+    # (observed 2026-08-31 in live BookmarkFolderTimeline responses)
+    if not instructions:
+        instructions = (
+            data.get("bookmark_collection_timeline", {})
+            .get("timeline", {})
+            .get("instructions", [])
+        )
     # Path 3: generic scan for instructions in nested timeline objects
     if not instructions:
         for v in data.values():
@@ -2280,7 +2312,7 @@ def _resolve_community_query_ids() -> Dict[str, str]:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _get_transaction_id(method: str, path: str) -> str:
+def _get_transaction_id(method: str, path: str, cookie_header: str = "") -> str:
     """Generate x-client-transaction-id for Twitter anti-bot verification.
 
     Uses XClientTransaction library to compute a signed header value
@@ -2288,6 +2320,12 @@ def _get_transaction_id(method: str, path: str) -> str:
     Caches the generator instance in memory (TTL 30 min) and source
     data on disk (TTL 1 hour) to avoid cold-start HTTP requests.
     Returns empty string if generation fails (graceful degradation).
+
+    Args:
+        cookie_header: The request's own ``cookie`` header. Required in
+            practice: the guest x.com page carries no ondemand.s manifest, so
+            without it the signer never initializes. The id itself is not
+            account-bound, so any valid login works.
     """
     global _transaction_generator, _transaction_generator_timestamp, _cached_home_html
 
@@ -2311,13 +2349,24 @@ def _get_transaction_id(method: str, path: str) -> str:
                 ondemand_text = cached["ondemand_text"]
             else:
                 # Fetch from network (share _cached_home_html with queryId resolver)
-                home_html = _fetch_home_html(ua)
+                home_html = _fetch_home_html(ua, cookie_header=cookie_header)
                 if not home_html:
                     _transaction_generator_timestamp = now
                     return ""
 
                 home_soup = bs4.BeautifulSoup(home_html, "html.parser")
-                ondemand_url = get_ondemand_file_url(response=home_soup)
+                # Upstream get_ondemand_file_url() does .search(...).group(1)
+                # with no guard, so a page without the manifest raises a bare
+                # AttributeError. Name the real cause instead.
+                try:
+                    ondemand_url = get_ondemand_file_url(response=home_soup)
+                except AttributeError:
+                    ondemand_url = ""
+                    logger.warning(
+                        f"[GraphQL] x.com HTML 无 ondemand.s manifest"
+                        f"（{len(home_html)} bytes，"
+                        f"{'已带登录态' if cookie_header else '未带登录态——游客页永远拿不到'}）"
+                    )
                 if ondemand_url:
                     try:
                         ondemand_resp = http_client.get(
@@ -2522,7 +2571,7 @@ def _execute_graphql(
     method = "POST" if use_post else "GET"
 
     # Inject x-client-transaction-id (required by SearchTimeline etc.)
-    tid = _get_transaction_id(method, path)
+    tid = _get_transaction_id(method, path, cookie_header=headers.get("cookie", ""))
     if tid:
         headers["x-client-transaction-id"] = tid
 
@@ -2662,22 +2711,40 @@ def _fallback_query_ids() -> Dict[str, str]:
     }
 
 
-def _fetch_home_html(user_agent: str) -> str:
-    """Fetch and cache x.com homepage HTML (matches baoyu http.ts caching)."""
-    global _cached_home_html
+def _fetch_home_html(user_agent: str, cookie_header: str = "") -> str:
+    """Fetch and cache x.com homepage HTML (matches baoyu http.ts caching).
 
-    if _cached_home_html:
-        return _cached_home_html
+    Args:
+        user_agent: UA to send.
+        cookie_header: Optional ``auth_token=...; ct0=...`` string. Sending it
+            is what makes x.com return the real app shell (~290 KB, carries the
+            ondemand.s manifest) instead of the guest login wall (~32 KB, which
+            has no ondemand.s at all — the transaction-id signer cannot work
+            from it). Guest and authenticated pages are cached separately.
+    """
+    global _cached_home_html, _cached_home_html_authed
+
+    authed = bool(cookie_header)
+    cached = _cached_home_html_authed if authed else _cached_home_html
+    if cached:
+        return cached
+
+    headers = {"user-agent": user_agent}
+    if authed:
+        headers["cookie"] = cookie_header
 
     try:
         resp = http_client.get(
             "https://x.com",
-            headers={"user-agent": user_agent},
+            headers=headers,
             timeout=15,
         )
         http_client.raise_for_status(resp)
-        _cached_home_html = resp.text
-        return _cached_home_html
+        if authed:
+            _cached_home_html_authed = resp.text
+        else:
+            _cached_home_html = resp.text
+        return resp.text
     except Exception as e:
         logger.warning(f"Failed to fetch x.com homepage: {e}")
         return ""

@@ -531,13 +531,34 @@ def cmd_doctor(platform: str = "all"):
 
         section("Twitter Cookie")
         try:
-            from feedgrab.fetchers.twitter_cookies import load_twitter_cookies
+            from feedgrab.fetchers.twitter_cookies import (
+                load_twitter_cookies,
+                load_all_twitter_cookie_sets,
+                is_primary_cookie_label,
+            )
             cookies = load_twitter_cookies()
             if cookies and cookies.get("auth_token") and cookies.get("ct0"):
                 tok = cookies["auth_token"]
                 ok(f"auth_token={tok[:8]}...  ct0=已存在")
             else:
                 fail("未找到有效 Cookie，请运行：feedgrab login twitter")
+
+            # Break the total down by account role: bookmarks and other
+            # account-private data only ever work with the primary account.
+            all_sets = load_all_twitter_cookie_sets()
+            primary = [(lb, ck) for lb, ck in all_sets if is_primary_cookie_label(lb)]
+            spares = [(lb, ck) for lb, ck in all_sets if not is_primary_cookie_label(lb)]
+            if primary:
+                lb, ck = primary[0]
+                ok(f"主账号：{lb}  auth_token={ck.get('auth_token', '')[:8]}...")
+            else:
+                fail(
+                    "主账号缺失（sessions/twitter.json 无有效登录态）"
+                    " — 书签等账号私有数据将无法抓取，请运行：feedgrab login twitter"
+                )
+            if spares:
+                names = ", ".join(lb for lb, _ in spares)
+                ok(f"备用号 {len(spares)} 个（仅用于公开内容轮换）：{names}")
         except Exception as e:
             fail(f"Cookie 加载错误：{e}")
 
@@ -1912,10 +1933,10 @@ def cmd_twitter_tweet_user_list(args: list, mode: str):
     import asyncio
     from feedgrab.config import x_tweet_user_list_enabled
     from feedgrab.fetchers.twitter_retweeters import (
-        fetch_tweet_user_list, extract_tweet_id,
+        fetch_tweet_user_list, extract_tweet_id, mode_requires_primary,
     )
     from feedgrab.fetchers.twitter_cookies import (
-        load_twitter_cookies, has_required_cookies,
+        load_twitter_cookies, load_primary_twitter_cookies, has_required_cookies,
     )
 
     if not x_tweet_user_list_enabled():
@@ -1934,10 +1955,23 @@ def cmd_twitter_tweet_user_list(args: list, mode: str):
         print('         feedgrab x-retweeters 1234567890')
         return
 
-    cookies = load_twitter_cookies()
-    if not has_required_cookies(cookies):
-        print("❌ 需要 Twitter Cookie，请先运行: feedgrab login twitter")
-        return
+    # Same author-only boundary the reader path enforces: X shows a tweet's
+    # liker list to its author alone, so favoriters must use the primary login
+    # instead of rotating. Without this gate the CLI printed "总数：0" and looked
+    # like the tweet simply had no likes.
+    if mode_requires_primary(mode):
+        cookies = load_primary_twitter_cookies()
+        if not has_required_cookies(cookies):
+            print("❌ 点赞者抓取需要主账号 Twitter 登录态（sessions/twitter.json）。")
+            print("   X 只允许推文作者本人查看谁点赞了自己的推文，")
+            print("   备用号（x_2.json 等）代抓只会拿到空列表。")
+            print("   请先运行: feedgrab login twitter")
+            return
+    else:
+        cookies = load_twitter_cookies()
+        if not has_required_cookies(cookies):
+            print("❌ 需要 Twitter Cookie，请先运行: feedgrab login twitter")
+            return
 
     try:
         result = asyncio.run(
@@ -2214,7 +2248,25 @@ def cmd_wechat_search(keyword: str, max_results: int = 0):
         sys.exit(1)
 
 
+def _harden_stdout_encoding():
+    """Keep emoji-bearing output from killing the process on legacy codepages.
+
+    Windows consoles default to GBK, where a plain ``print("!!")`` of an emoji
+    raises UnicodeEncodeError. That turned the GraphQL 401 "please re-login"
+    guidance — the one message the user needs — into a crash.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(errors="replace")
+        except (ValueError, OSError):
+            pass
+
+
 def main():
+    _harden_stdout_encoding()
     if len(sys.argv) < 2:
         print("""
 \U0001f4d6 feedgrab \u2014 通用内容抓取器

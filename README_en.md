@@ -90,9 +90,10 @@ feedgrab clip
 # Fetch a tweet (with GraphQL deep fetch if cookies configured)
 feedgrab https://x.com/elonmusk/status/123456
 
-# Batch fetch bookmarks (requires X_BOOKMARKS_ENABLED=true)
-feedgrab https://x.com/i/bookmarks
-feedgrab https://x.com/i/bookmarks/2015311287715340624  # Specific bookmark folder
+# Batch fetch bookmarks (requires X_BOOKMARKS_ENABLED=true; primary session only)
+feedgrab https://x.com/i/history                       # Bookmarks overview (current X URL)
+feedgrab https://x.com/i/history/bookmarks/2015311287715340624  # Specific bookmark folder
+feedgrab https://x.com/i/bookmarks                     # Legacy URL, still accepted
 
 # Batch fetch user tweets (requires X_USER_TWEETS_ENABLED=true)
 feedgrab https://x.com/iBigQiang                        # All tweets
@@ -113,13 +114,13 @@ feedgrab https://x.com/i/lists/2002743803959300263/subscribers   # List subscrib
 
 # v0.22.0: Batch fetch user replies & likes
 feedgrab https://x.com/ai_xiaomu/with_replies                    # User replies tab (incl. self-replies)
-feedgrab https://x.com/ai_xiaomu/likes                           # User likes (Twitter default = private)
+feedgrab https://x.com/iBigQiang/likes                           # Your own likes only -- primary session required
 
 # v0.23.0: Fetch retweeters / favoriters of a tweet (outputs MD + CSV, sorted by followers)
 feedgrab x-retweeters https://x.com/ai_xiaomu/status/2051099012288356592
 feedgrab x-favoriters 2051099012288356592                        # Accepts plain tweet_id too
 feedgrab https://x.com/ai_xiaomu/status/2051099012288356592/retweets  # URL-based routing
-feedgrab https://x.com/ai_xiaomu/status/2051099012288356592/likes     # Likes (author may hide)
+feedgrab https://x.com/iBigQiang/status/2051099012288356592/likes     # Favoriters: tweet author only -- primary session required
 
 # v0.23.0: Twitter People search (SearchTimeline product=People)
 feedgrab x-so "AI Agent" --people                                # People search, ranked by followers
@@ -448,6 +449,23 @@ Additional cookie files use the same format as Method 3. To get cookies:
 > Cookies are not device-bound. They work across machines as long as you don't log out in the browser.
 >
 > On 429, automatically switches to next available account. Auto-recovers after 15-minute cooldown.
+
+#### Primary Account vs. Rotation: What Each Channel Needs
+
+Rotation only helps for **public** data. Account-private channels are readable by exactly one
+login, so rotating there can only lose the single account that would have worked. Verified by
+live fetches on 2026-08-31 (primary `@iBigQiang` vs. spare `x_2.json`), not by guessing:
+
+| Channel | Boundary | Behaviour |
+|---------|----------|-----------|
+| Bookmarks (`/i/history`, `/i/history/bookmarks/<id>`) | Account itself | Pinned to `sessions/twitter.json`; hard error if missing |
+| User likes (`/<user>/likes`) | Account itself | Pinned to primary. A spare account gets an empty timeline even for a public profile |
+| Favoriters (`/status/<id>/likes`, `x-favoriters`) | Tweet author | Pinned to primary. Measured against a 12,817-like third-party tweet: every non-author account gets an empty timeline |
+| Retweeters (`/status/<id>/retweets`, `x-retweeters`) | Public | Rotates across all accounts |
+| Single tweet / Article / user tweets / replies / lists / list members / followers / following / keyword & people search | Public | Rotates across all accounts |
+
+An empty likes/favoriters result therefore means "you are not the owner/author", **not** "they hid
+the list" — X exposes those lists to one account only.
 
 ### TwitterAPI.io Paid API (Optional)
 

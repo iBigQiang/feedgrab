@@ -30,9 +30,10 @@ If not ready, suggest `/feedgrab-setup`.
 
 #### Bookmarks
 ```bash
-# Requires: X_BOOKMARKS_ENABLED=true + feedgrab login twitter
-feedgrab https://x.com/i/bookmarks                          # All bookmarks
-feedgrab https://x.com/i/bookmarks/2015311287715340624      # Specific folder
+# Requires: X_BOOKMARKS_ENABLED=true + feedgrab login twitter (primary session only)
+feedgrab https://x.com/i/history                            # All bookmarks (current X URL)
+feedgrab https://x.com/i/history/bookmarks/2015311287715340624  # Specific folder
+feedgrab https://x.com/i/bookmarks                          # Legacy URL, still accepted
 ```
 
 #### User Tweets

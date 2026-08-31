@@ -6,7 +6,7 @@ feedgrab 是一个万能内容抓取器，从任意平台抓取内容并输出�
 
 - **仓库**：https://github.com/iBigQiang/feedgrab
 - **作者**：[@iBigQiang](https://github.com/iBigQiang)（强子手记）
-- **当前版本**：v0.25.0
+- **当前版本**：v0.25.1
 - **Python**：≥3.10
 - **许可证**：MIT
 
@@ -165,7 +165,7 @@ feedgrab/
 
 | 平台 | 关键点 |
 |------|--------|
-| X/Twitter | `x-client-transaction-id` 签名头必需（SearchTimeline）；queryId 四级解析（disk→community→JS→hardcoded）；feature flags 动态更新 + 紧凑编码；Cookie 多账号轮换（`sessions/twitter.json + x_2.json + ...`）；Article 优先 GraphQL `content_state` 原生渲染 |
+| X/Twitter | `x-client-transaction-id` 签名头必需（SearchTimeline）；queryId 四级解析（disk→community→JS→hardcoded）；feature flags 动态更新 + 紧凑编码；Cookie 多账号轮换（`sessions/twitter.json + x_2.json + ...`）；Article 优先 GraphQL `content_state` 原生渲染；**账号私有渠道锁主账号**（`fetch_with_cookie_rotation(primary_only=True)`）：书签 / 用户 likes（边界=账号本人）/ favoriters（边界=推文作者本人），2026-08-31 实测确认小号代抓必然空 timeline，轮换只会丢掉唯一可能成功的账号；闸门判据唯一来源是 `mode_requires_primary()`（读 `_MODE_CONFIG`，未知 mode 保守要主账号），reader 与 CLI 两个入口共用，缺主账号时前置硬失败；`parse_tweet_user_list_url` 必须带子域组（`www.` / `mobile.` 会照常路由进来）；钉死单账号后轮换的"跳过限流账号"失效，须显式查 `cookie_rate_limit_remaining()`，别把 15 分钟冷却报成"登录态过期"；retweeters / 单贴 / 长文 / 账号批量 / 列表 / 关注列表 / 搜索均为公开，保持轮换；书签 URL 现行 `/i/history` + `/i/history/bookmarks/<id>`（路由与解析统一用 `[0-9]`），legacy `/i/bookmarks` 仍解析 |
 | 小红书 | xhshow 签名配置用真实 `platform.system()` + `get_user_agent()`；Cookie 从 `sessions/xhs.json`；xsec_token LRU 缓存 500 条；Pinia Store 注入作为 Tier 0.5 兜底（`XHS_PINIA_ENABLED` 默认 true） |
 | LinuxDo / IDCFlare / Discourse | 主路径不是 DOM 抓取，而是 `topic.json`：Tier 0 游客/已保存 session Cookie → Tier 1 CDP 页面内 `fetch(...json)` → Tier 2 Stealth Playwright 页面内 `fetch(...json)` → Tier 3 Jina；明确 404 / 私有 / 需登录时提前终止，不再把错误页写入 Markdown；默认 `reply_mode=author` 只抓主贴 + 楼主自回，可切换 `all` / `none`；本地 `sessions/{platform}.json` 缺失时先做 CDP / browser warmup |
 | 飞书 | 必用 vanilla playwright；标题清理零宽字符（U+200B-U+206F, U+FEFF）；Block→MD 支持 20+ 类型；知识库批量优先抓虚拟目录树 `wikiToken`；代码块统一使用 4 个反引号；表格优先读取 `snapshot.rows_id / columns_id` 修复单行错位；图片数据在 `snapshot.image.token`（非 `image.token`） |
@@ -193,6 +193,7 @@ feedgrab/
 
 | 版本 | 功能 |
 |------|------|
+| v0.25.1 | X 全渠道权限实测 + 账号私有渠道锁主账号：18 项渠道 × 2 账号交叉实测确认三级边界（公开 → 账号本人 → 推文作者本人），用户 likes / favoriters 改走 `primary_only=True`，retweeters / 单贴 / 长文 / 列表 / 搜索等公开渠道保持轮换；缺主账号时 reader 与 CLI 前置硬失败，闸门判据统一到 `mode_requires_primary()`（`_MODE_CONFIG` 单一来源）；`parse_tweet_user_list_url` 兼容 `www.` / `mobile.` 子域；主账号被限流时区分「限流冷却」与「登录态过期」两种归因；修复书签 URL 路由（X 已迁到 `/i/history`，legacy `/i/bookmarks` 仍解析，路由与解析统一用 `[0-9]`）；修正两处把平台机制误说成对方隐私设置的文案；10 项渠道端到端实测全部落地；测试 390 → 436 passed |
 | v0.25.0 | 第一阶段 service layer 架构升级：新增 `feedgrab/service/` 的结构化 API（models / FetchService / Output / Login / Settings / Doctor / Job），CLI 单 URL 和 MCP 入口改为共用 `FetchService`，保持终端命令、Markdown 输出、去重索引和 session 格式兼容；修复 MP 后台 session 失效错误被掩盖问题；FlowUs 在线图片模式改为写入可预览的 `cdn2.flowus.cn` 签名 URL，本地模式仍通过 `FLOWUS_DOWNLOAD_IMAGES=true` 下载 `attachments/`；测试 210 passed |
 | v0.24.1 | 修复 Twitter 多账号 429 轮换：抽出 `fetch_with_cookie_rotation()` helper（`twitter_cookies.py`），统一 7 个批量 fetcher（user_tweets / bookmarks / list / user_lists / retweeters / search_people / keyword_search）的"账号限流后跨账号重试"逻辑；之前重试仅复用同一被限流账号 3 次就停（user_tweets）或直接 break（其余 6 个），现在改为**每个账号都试一遍**才真正终止；关键日志统一加 `>>> ... <<<` 高亮 + 剩余可用账号数 + 最早解封倒计时；测试 193 → 201；实测 `feedgrab https://x.com/AdrianPunk115` 抓取量 557 → 632（+13.4%） |
 | v0.24.0 | 新增「FlowUs 息流」（flowus.cn）平台支持（公开分享 + 付费/私有分享 + 个人空间链接）；Notion 风格 block-tree 扁平 JSON 渲染（8 类 block：page/paragraph/bullet/ordered/heading/quote/media/code + 5 种 enhancer + 链接片段）；纯 HTTP 链路（公开零 cookie / 付费需 `next_auth`+`next_auth.sig` 双 cookie）+ CDP/Launch 浏览器兜底；图片本地化：headless 浏览器渲染 + 多 pass 滚动 + lazy→eager 抓 `cdn2.flowus.cn` 签名 URL（59/59 全成功） |

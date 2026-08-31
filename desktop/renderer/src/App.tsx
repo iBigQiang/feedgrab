@@ -873,7 +873,7 @@ function FetchView(props: {
           id="content-links"
           value={props.urlText}
           onChange={(event) => props.setUrlText(event.target.value)}
-          placeholder={"一行一个URL或词（不含冒号前部分），样例如下：\n--------------------\nX 单贴：https://x.com/iBigQiang/status/2015088004109615266\nX 长文：https://x.com/iBigQiang/status/2061419867862082034\nX 关键词批量：codex\nX 词组批量抓：claude code,codex,Hermes,opencode\nX 按书签批量：https://x.com/i/bookmarks/2007306111150674215\nX 按列表批量：https://x.com/i/lists/2062881752830673350\nX 按账号批量：https://x.com/iBigQiang\n公众号文章：https://mp.weixin.qq.com/s/e_nzlfUQkWIwhll08uyTTg\n公众号批量：强子手记\nGitHub：https://github.com/iBigQiang/feedgrab\n其他：URL（单贴地址、wiki首页地址等）"}
+          placeholder={"一行一个URL或词（不含冒号前部分），样例如下：\n--------------------\nX 单贴：https://x.com/iBigQiang/status/2015088004109615266\nX 长文：https://x.com/iBigQiang/status/2061419867862082034\nX 关键词批量：codex\nX 词组批量抓：claude code,codex,Hermes,opencode\nX 按书签批量：https://x.com/i/history/bookmarks/2007306111150674215\nX 总书签批量：https://x.com/i/history\nX 按列表批量：https://x.com/i/lists/2062881752830673350\nX 按账号批量：https://x.com/iBigQiang\n公众号文章：https://mp.weixin.qq.com/s/e_nzlfUQkWIwhll08uyTTg\n公众号批量：强子手记\nGitHub：https://github.com/iBigQiang/feedgrab\n其他：URL（单贴地址、wiki首页地址等）"}
           spellCheck={false}
         />
         {props.fetchPlan.commandPreview ? (

@@ -132,6 +132,49 @@ def load_all_twitter_cookie_sets() -> list[tuple[str, dict]]:
     return _load_all_cookie_sets()
 
 
+# Sources that identify the account the user themself logged in as. Numbered
+# files (x_2.json, twitter_2.json, ...) are rotation spares by convention.
+_PRIMARY_SOURCE_LABELS = (
+    "env",
+    "playwright(twitter.json)",
+    "cookie_file(x.json)",
+    "chrome_cdp",
+)
+
+
+def is_primary_cookie_label(label: str) -> bool:
+    """Whether a cookie source label denotes the user's own (primary) account."""
+    return label in _PRIMARY_SOURCE_LABELS
+
+
+def load_primary_twitter_cookies() -> dict:
+    """Load ONLY the primary account cookies — never fall back to spares.
+
+    Account-private data (bookmarks above all) cannot be read by another
+    account: rotating to x_2.json only ever yields that account's own data or
+    a flat permission error. Callers handling private data must use this
+    instead of :func:`load_twitter_cookies`.
+
+    Returns:
+        The primary account's cookies, or {} when no primary login exists.
+    """
+    for label, cookies in _load_all_cookie_sets():
+        if is_primary_cookie_label(label):
+            activate_twitter_cookie(cookies)
+            logger.info(
+                f"Twitter 主账号 cookie: {label} "
+                f"(auth_token={cookies.get('auth_token', '')[:8]}...)"
+            )
+            return cookies
+
+    logger.error(
+        ">>> 未找到主账号 Twitter 登录态 <<< "
+        "已跳过备用号（x_2.json 等）——账号私有数据换号读不到。"
+        "请运行: feedgrab login twitter"
+    )
+    return {}
+
+
 def activate_twitter_cookie(cookies: dict) -> None:
     """Record the cookie set currently being used for logging/rotation."""
     global _current_account_key
@@ -238,11 +281,78 @@ def earliest_rate_limit_recovery_seconds() -> int:
     return max(0, int(soonest - now))
 
 
+def cookie_rate_limit_remaining(cookies: dict) -> int:
+    """Seconds until this specific account leaves the rate-limit table (0 = free)."""
+    account_key = (cookies or {}).get("auth_token", "")[:8]
+    if not account_key:
+        return 0
+    expiry = _rate_limited_accounts.get(account_key)
+    if not expiry:
+        return 0
+    return max(0, int(expiry - time.time()))
+
+
+def _fetch_with_primary_cookie(fetcher_callable, *args, label: str = "GraphQL", **kwargs):
+    """Single-shot fetch pinned to the primary account (no rotation).
+
+    Returns:
+        (response, cookies) — same contract as :func:`fetch_with_cookie_rotation`.
+    """
+    cookies = load_primary_twitter_cookies()
+    if not cookies:
+        logger.error(
+            f"[{label}] >>> 无可用主账号 Cookie <<< "
+            f"该场景为账号私有数据，禁止降级到备用号（x_2.json 等）"
+        )
+        return None, {}
+
+    account_key = cookies.get("auth_token", "")[:8]
+
+    # The rotation path skips limited accounts via load_twitter_cookies(); with
+    # a single pinned account there is nothing to skip, so check explicitly.
+    # Firing a request we know will 429 would otherwise come back as "no
+    # response" and get misreported as an expired login below.
+    cooldown = cookie_rate_limit_remaining(cookies)
+    if cooldown:
+        logger.error(
+            f"[{label}] >>> 主账号 {account_key}... 正在限流冷却 <<< "
+            f"约 {cooldown}s 后恢复（{cooldown // 60} 分钟）— "
+            f"账号私有数据无法用备用号代抓，本次终止"
+        )
+        return None, cookies
+
+    try:
+        response = fetcher_callable(*args, cookies=cookies, **kwargs)
+    except Exception as exc:
+        logger.error(f"[{label}] 主账号 {account_key}... 调用异常: {exc}")
+        return None, cookies
+
+    if not response:
+        # The GraphQL layer calls mark_cookie_rate_limited() on a 429, so if the
+        # account landed in the table during this very call the cause is a rate
+        # limit, not a dead session. Reporting both as "check your login" sent
+        # users to re-run `feedgrab login twitter` for a 15-minute cooldown.
+        cooldown = cookie_rate_limit_remaining(cookies)
+        if cooldown:
+            logger.error(
+                f"[{label}] >>> 主账号 {account_key}... 本次请求触发限流 <<< "
+                f"约 {cooldown}s 后恢复（{cooldown // 60} 分钟）— "
+                f"登录态本身没问题，等冷却结束重跑即可"
+            )
+        else:
+            logger.error(
+                f"[{label}] >>> 主账号 {account_key}... 请求无响应 <<< "
+                f"账号私有数据不轮换备用号，请检查该账号登录态是否过期"
+            )
+    return response, cookies
+
+
 def fetch_with_cookie_rotation(
     fetcher_callable,
     *args,
     label: str = "GraphQL",
     network_retry_delay: float = 5.0,
+    primary_only: bool = False,
     **kwargs,
 ):
     """跨 cookie 账号的统一重试 helper。
@@ -257,12 +367,19 @@ def fetch_with_cookie_rotation(
             ``cookies`` 通过 kwargs 注入（fetcher 签名通常为 ``(id, cookies, cursor=...)``）。**
         label: 日志前缀（如 ``UserTweets``/``Bookmarks``）。
         network_retry_delay: 切换账号后等待的秒数。
+        primary_only: 只用主账号，禁止轮换到备用号。用于书签这类**账号私有数据**
+            —— 换号读到的是别人的数据或直接权限错误，轮换在语义上无意义。
 
     Returns:
         (response, cookies)
             - response 为 None 表示所有账号都尝试过且失败
             - cookies 为最后一次使用的账号 cookie dict（即便失败也返回，用于日志/上下文）
     """
+    if primary_only:
+        return _fetch_with_primary_cookie(
+            fetcher_callable, *args, label=label, **kwargs
+        )
+
     total = count_total_accounts()
     if total == 0:
         logger.error(f"[{label}] 未找到任何 Twitter 账号 Cookie")
@@ -463,16 +580,22 @@ def _load_all_playwright_sessions() -> list[tuple[str, dict]]:
     results = []
     session_dir = get_session_dir()
 
-    # Primary file migration
+    # Primary file migration. A guest-mode shell (file present but carrying no
+    # auth_token/ct0) must NOT shadow a valid legacy session — that silently
+    # dropped the primary account and rotated to spares instead.
     session_path = session_dir / "twitter.json"
-    if not session_path.exists():
+    existing = _read_playwright_session(session_path) if session_path.exists() else {}
+    if not has_required_cookies(existing):
         for legacy_dir in _LEGACY_SESSION_DIRS:
             legacy_path = legacy_dir / "twitter.json"
-            if legacy_path.exists():
-                session_dir.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(str(legacy_path), str(session_path))
-                logger.info(f"Migrated session: {legacy_path} -> {session_path}")
-                break
+            if not legacy_path.exists():
+                continue
+            if not has_required_cookies(_read_playwright_session(legacy_path)):
+                continue
+            session_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(legacy_path), str(session_path))
+            logger.info(f"Migrated session: {legacy_path} -> {session_path}")
+            break
 
     # Load twitter.json and twitter_{N}.json files
     if session_dir.exists():
@@ -483,6 +606,14 @@ def _load_all_playwright_sessions() -> list[tuple[str, dict]]:
                 cookies = _read_playwright_session(sf)
                 if has_required_cookies(cookies):
                     results.append((f"playwright({sf.name})", cookies))
+                else:
+                    # Name the failure instead of silently rotating past it.
+                    missing = [c for c in REQUIRED_COOKIES if not cookies.get(c)]
+                    logger.warning(
+                        f"跳过 session {sf.name}：缺少 {'/'.join(missing) or '有效'} "
+                        f"cookie（游客态空壳，非登录态）"
+                        f"—— 如需该账号请重新运行: feedgrab login twitter"
+                    )
 
     return results
 

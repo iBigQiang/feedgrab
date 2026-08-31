@@ -28,16 +28,24 @@ from feedgrab.fetchers.twitter_graphql import (
 )
 
 
+# primary_only marks the modes X restricts to the tweet's own author.
+# Measured 2026-08-31 against a 12817-like tweet: Favoriters returns
+# TimelineTerminateTimeline for every account that did not write the tweet,
+# while Retweeters returns 20 entries for any logged-in account. So rotating
+# helps Retweeters and can only lose the one account that might work for
+# Favoriters.
 _MODE_CONFIG = {
     "retweeters": {
         "fetcher": fetch_retweeters_page,
         "parser": parse_retweeters_users,
         "label": "转推者",
+        "primary_only": False,
     },
     "favoriters": {
         "fetcher": fetch_favoriters_page,
         "parser": parse_favoriters_users,
         "label": "点赞者",
+        "primary_only": True,
     },
 }
 
@@ -52,9 +60,13 @@ def parse_tweet_user_list_url(url: str) -> tuple:
     Returns:
         (mode, tweet_id) or (None, None) if URL doesn't match.
     """
+    # Subdomains must be tolerated: reader._detect_platform routes on
+    # `"x.com" in domain`, so www./mobile. URLs reach us. Without the optional
+    # subdomain group they parsed as (None, None) and the caller's primary-only
+    # gate below silently fell through to rotation.
     # /status/<id>/retweets → retweeters
     m = re.search(
-        r'https?://(?:x|twitter)\.com/[^/]+/status/(\d+)/retweets/?',
+        r'https?://(?:[\w-]+\.)?(?:x|twitter)\.com/[^/]+/status/(\d+)/retweets/?',
         url,
     )
     if m:
@@ -62,13 +74,33 @@ def parse_tweet_user_list_url(url: str) -> tuple:
 
     # /status/<id>/likes → favoriters (tweet-level likes, not user-level Likes)
     m = re.search(
-        r'https?://(?:x|twitter)\.com/[^/]+/status/(\d+)/likes/?',
+        r'https?://(?:[\w-]+\.)?(?:x|twitter)\.com/[^/]+/status/(\d+)/likes/?',
         url,
     )
     if m:
         return ("favoriters", m.group(1))
 
     return (None, None)
+
+
+def mode_requires_primary(mode: Optional[str]) -> bool:
+    """Whether a tweet-user-list mode is restricted to the tweet's author.
+
+    Single source of truth for callers (reader, CLI) so the policy lives with
+    _MODE_CONFIG instead of being restated as `if mode == "favoriters"`.
+
+    None means the URL did not parse as a tweet-user-list at all; that path
+    ends in fetch_tweet_user_list's ValueError, so answer False and let the
+    caller's generic cookie check run. A mode string we don't know errs toward
+    the primary account: better to ask for the one login that might work than
+    to fan a possibly-private read across the spares.
+    """
+    if mode is None:
+        return False
+    config = _MODE_CONFIG.get(mode)
+    if config is None:
+        return True
+    return bool(config["primary_only"])
 
 
 def extract_tweet_id(value: str) -> Optional[str]:
@@ -146,6 +178,7 @@ async def fetch_tweet_user_list(url_or_id: str, cookies: dict) -> Dict[str, Any]
     fetcher = cfg["fetcher"]
     parser = cfg["parser"]
     label = cfg["label"]
+    primary_only = cfg.get("primary_only", False)
 
     logger.info(f"[TweetUserList:{mode}] 开始抓取 {label}: tweet_id={tweet_id}")
 
@@ -166,6 +199,7 @@ async def fetch_tweet_user_list(url_or_id: str, cookies: dict) -> Dict[str, Any]
             fetcher, tweet_id,
             label=f"TweetUserList:{mode}",
             cursor=cursor, count=per_page,
+            primary_only=primary_only,
         )
         if rotated_cookies:
             cookies = rotated_cookies
@@ -179,10 +213,19 @@ async def fetch_tweet_user_list(url_or_id: str, cookies: dict) -> Dict[str, Any]
 
         entries, cursors = parser(response)
         if not entries:
-            logger.info(
-                f"[TweetUserList:{mode}] 第 {page + 1} 页无更多条目，"
-                f"累计 {len(all_users)} 个"
-            )
+            if mode == "favoriters" and page == 0:
+                logger.warning(
+                    f"[TweetUserList:{mode}] >>> 点赞者列表为空 <<< "
+                    f"X 只允许推文作者本人查看谁点赞了自己的推文，"
+                    f"抓别人的推文时任何账号都返回空。"
+                    f"若 tweet={tweet_id} 是你自己发的，请确认 "
+                    f"sessions/twitter.json 是该账号的登录态：feedgrab login twitter"
+                )
+            else:
+                logger.info(
+                    f"[TweetUserList:{mode}] 第 {page + 1} 页无更多条目，"
+                    f"累计 {len(all_users)} 个"
+                )
             break
 
         page_users = 0
@@ -210,13 +253,13 @@ async def fetch_tweet_user_list(url_or_id: str, cookies: dict) -> Dict[str, Any]
         if page < max_pages - 1:
             _time.sleep(delay)
 
-    # --- Tier-1 fallback: Twitter 公开 Retweeters/Favoriters 端点对未登录或
-    # 部分账号可能返回空（受推文可见性限制）。若 0 条 + 模式为 favoriters，
-    # 提示用户可能被设为私密。
+    # Favoriters is author-only, not a per-tweet privacy toggle: X shows the
+    # liker list to the tweet's author and to nobody else (measured against a
+    # 12817-like third-party tweet — every account got an empty timeline).
     if not all_users and mode == "favoriters":
         logger.warning(
-            f"[TweetUserList:{mode}] 该推文未抓到点赞用户 — "
-            f"可能作者隐藏了点赞列表，或当前 Cookie 无访问权限。"
+            f"[TweetUserList:{mode}] tweet={tweet_id} 未抓到点赞用户 — "
+            f"X 只把点赞者列表展示给推文作者本人，抓别人的推文时任何账号都为空"
         )
 
     # --- Output ---
