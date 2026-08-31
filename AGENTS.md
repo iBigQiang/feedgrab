@@ -6,7 +6,7 @@ feedgrab 是一个万能内容抓取器，从任意平台抓取内容并输出�
 
 - **仓库**：https://github.com/iBigQiang/feedgrab
 - **作者**：[@iBigQiang](https://github.com/iBigQiang)（强子手记）
-- **当前版本**：v0.25.1
+- **当前版本**：v0.25.2
 - **Python**：≥3.10
 - **许可证**：MIT
 
@@ -252,6 +252,16 @@ UserTweets API 受服务端限制（~800条），通过 Playwright 浏览器按�
 
 **空结果的正确归因**：likes / favoriters 为空意味着「你不是本人/作者」，**不是**「对方隐藏了列表」——X 只把这两个列表暴露给唯一一个账号。此前代码文案把平台机制说成对方的隐私设置，会误导用户去调设置，已修正。
 
+
+### 线程抓取的目标推文校验（`twitter_thread.py`）
+
+`fetch_tweet_thread(tweet_id, ...)` 重建的是**根推作者的自回复链**，不是「以 tweet_id 为中心的会话」。`_filter_same_thread` 先把 `id == conversation_id` 的推文认作 root，再用 `_is_same_thread` 过滤，**首条判据就是 `user_id != root_user_id -> False`**。
+
+危险之处在于入口：`_classify_tweet` 只看「是不是回复」（`conversation_id != id` 或 `in_reply_to` 非空），**任何回复推文都会被送进线程路径**——包括别人在该 thread 下的回复。这类目标必然被同作者过滤掉，而组装阶段又只用 `thread_tweets[0]`（根推），传入的 `tweet_id` 被完全丢弃。结果：抓 A 的回复，落盘的是 B 的根推，正文彻底丢失；标题也变成根推的，多条撞名后触发 `_resolve_filepath` 的 hash 后缀，表面症状是「重复文件」，很容易被误判成去重索引失效（其实 `source` / `item_id` 都是对的）。
+
+**约定**：目标推文没能通过同作者过滤时必须返回 `None`，让调用方退回单条抓取——`twitter.py → _fetch_via_graphql` 的 fallback 会按 `tweet_data["id"] == tweet_id` 精确取目标推文。影响面是全部单条推文抓取，不止书签：`_fetch_via_graphql` 无条件先跑 `fetch_tweet_thread`（"Try thread fetch first"）。
+
+排查同类问题时的经验：**先查目标推文的真实身份再下结论**。本例最初的推断是「转推被存成了转推者的 URL」，直接调 `fetch_tweet_by_rest_id` 一看，三条全都 `是否转推: 否`，实际是回复——推断错了，是实测把方向纠正过来的。
 ### 输出格式
 
 每条内容 → 独立 `.md` 文件，按平台分目录（`X/`、`XHS/`、`LinuxDo/`、`mpweixin/`、`YouTube/` 等），Obsidian 兼容 YAML front matter（title/source/author/published/likes/tags 等）。
@@ -454,6 +464,7 @@ yt-dlp 默认只启用 deno。`_js_runtime_args()` 自动检测 deno/node/bun �
 
 | 版本 | 功能 |
 |------|------|
+| v0.25.2 | 修复线程抓取把「别人的回复」替换成根推内容：`fetch_tweet_thread` 重建的是**根推作者**的自回复链（`_is_same_thread` 第一条判据即 `user_id != root_user_id -> False`），而 `_classify_tweet` 会把任何回复推文都送进线程路径，于是收藏/抓取别人在某 thread 下的回复时，落盘正文被写成根推、被抓那条的内容彻底丢失（标题也随之撞名，触发 hash 后缀，表面症状是「重复文件」）；影响面含全部单条推文抓取（`_fetch_via_graphql` 无条件先跑 thread）。修法是目标推文未通过同作者过滤时返回 `None`，让调用方落到 `twitter.py` 已有的按 `id` 精确取目标推文的 fallback；新增 6 例并用 `git stash` 撤销修复验证测试确实会失败（排除空转）；真实重抓书签文件夹复验，三份产物的 source/author/正文一一对应，撞名文件 2 → 0；测试 436 → 442 passed |
 | v0.25.1 | X 全渠道权限实测 + 账号私有渠道锁主账号：18 项渠道 × 2 账号交叉实测确认三级边界（公开 → 账号本人 → 推文作者本人），用户 likes / favoriters 改走 `primary_only=True`，retweeters / 单贴 / 长文 / 列表 / 搜索等公开渠道保持轮换；缺主账号时 reader 与 CLI 前置硬失败，闸门判据统一到 `mode_requires_primary()`（`_MODE_CONFIG` 单一来源）；`parse_tweet_user_list_url` 兼容 `www.` / `mobile.` 子域；主账号被限流时区分「限流冷却」与「登录态过期」两种归因；修复书签 URL 路由（X 已迁到 `/i/history`，legacy `/i/bookmarks` 仍解析，路由与解析统一用 `[0-9]`）；修正两处把平台机制误说成对方隐私设置的文案；10 项渠道端到端实测全部落地；测试 390 → 436 passed |
 | v0.25.0 | 第一阶段 service layer 架构升级：新增 `feedgrab/service/` 的结构化 API（models / FetchService / Output / Login / Settings / Doctor / Job），CLI 单 URL 和 MCP 入口改为共用 `FetchService`，保持终端命令、Markdown 输出、去重索引和 session 格式兼容；修复 MP 后台 session 失效错误被掩盖问题；FlowUs 在线图片模式改为写入可预览的 `cdn2.flowus.cn` 签名 URL，本地模式仍通过 `FLOWUS_DOWNLOAD_IMAGES=true` 下载 `attachments/`；测试 210 passed |
 | v0.21.0 | 新增「知识星球」（Zsxq）平台支持（articles.zsxq.com 长文章 + wx.zsxq.com 短帖 + t.zsxq.com 短链 302 解析）；4 级 Tier 链路 + 五形态 topic 渲染（含 solution）+ 三态评论筛选 |

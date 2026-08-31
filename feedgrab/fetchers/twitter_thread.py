@@ -158,6 +158,21 @@ def fetch_tweet_thread(
         logger.warning("[Thread] No same-thread tweets after filtering")
         return None
 
+    # The requested tweet must survive the same-author filter above.
+    # _is_same_thread() keeps only tweets whose user_id matches the conversation
+    # root's, so asking for someone else's reply inside a thread leaves the
+    # target filtered out — and the caller would then render the root author's
+    # chain under the requested tweet's URL, silently replacing what was asked
+    # for with a different person's post. Bail out so the caller falls back to
+    # fetching the requested tweet on its own.
+    if tweet_id and not any(t.get("id") == tweet_id for t in thread_tweets):
+        logger.info(
+            f"[Thread] 目标推文 {tweet_id} 不在根推 @{thread_tweets[0].get('author', '')} "
+            f"的自回复链里（多半是别人在该 thread 下的回复）——退回单条抓取，"
+            f"避免把根推内容写成这条推文"
+        )
+        return None
+
     root_tweet = thread_tweets[0]
     author = root_tweet.get("author", "")
     root_user_id = root_tweet.get("user_id", "")

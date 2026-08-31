@@ -2,6 +2,109 @@
 
 开发日志 — 记录每次升级迭代的确定方案、实施细节和状态追踪，作为项目演进的记忆文件。
 
+## 2026-08-31 · v0.25.2 · 线程抓取不再把「别人的回复」替换成根推内容
+
+### 背景
+
+用户用 v0.1.22 客户端抓书签文件夹「银行卡」，发现产出目录里有三个标题相同、带 hash 后缀的
+md，看起来像重复文件：
+
+```
+老V_2026-02-04：汇丰红狮子已收到。有几个信息分享一下：1.md
+老V_2026-02-04：汇丰红狮子已收到。有几个信息分享一下：1_c9a11db8bb8d.md
+老V_2026-02-04：汇丰红狮子已收到。有几个信息分享一下：1_e8100fb872e0.md
+```
+
+### 根因：重复只是症状，真正的问题是内容被替换了
+
+三个文件的 `source` URL 和 `item_id` **其实都是对的**，本就该是三条不同的书签。直接查 GraphQL
+拿到三条推文的真实身份后，性质完全变了：
+
+| status ID | 真实作者 | 真实正文 |
+|---|---|---|
+| 2019023586112176237 | @LaoVStories | 汇丰红狮子已收到…（thread 根推） |
+| 2019060923751632901 | @ClockWorkMe | `@iBigQiang @LaoVStories 红的是ATM提款卡…` |
+| 2019061014575137081 | @ClockWorkMe | `@iBigQiang @LaoVStories https://t.co/…` |
+
+后两条是**别人在该 thread 下回复用户**的推文，被单独收藏。但三个 md 的正文全被写成了根推的
+「汇丰红狮子已收到…」——**被收藏那两条的正文彻底丢失**。标题也跟着变成根推的，三份撞名，才触发
+`_resolve_filepath` 的 hash 后缀机制，表现为「重复文件」。
+
+根因链（逐环实证）：
+
+1. `twitter_bookmarks.py → _classify_tweet`：`conversation_id != id` 或 `in_reply_to` 非空即判为
+   `thread`。**任何回复推文都会走线程路径**，包括别人的回复。
+2. → `fetch_tweet_thread(tweet_id)`，其 docstring 写明用途是「reconstructs the full
+   **author self-reply chain**」——它重建的是**根推作者**的自回复链。
+3. `twitter_thread.py → _filter_same_thread` 先找 `id == conversation_id` 的推文当 root（即根推），
+   再用 `_is_same_thread` 过滤，**第一条判据就是 `user_id != root_user_id -> False`**，
+   目标推文（别人的回复）在这里被过滤掉。
+4. 传入的 `tweet_id` 只用来发起 TweetDetail 请求，组装结果时被完全丢弃：
+   `root_tweet = thread_tweets[0]`、`author = root_tweet.author`。
+
+实测确认（不是推断）：
+
+```
+传入 tweet_id : 2019060923751632901（@ClockWorkMe 的回复）
+返回 author   : @LaoVStories
+返回 root_tweet.id : 2019023586112176237
+>>> 被收藏的那条是否在返回结果里: 不在 —— 内容丢失
+```
+
+**影响面不止书签**：`twitter.py:191` 的 `_fetch_via_graphql` 是无条件先跑 `fetch_tweet_thread`
+（注释即 "Try thread fetch first"），所以任何单条推文抓取，只要目标是别人对某 thread 的回复，
+都会被替换成根推。
+
+### 实施（只改一处）
+
+`twitter.py` 里本就有一条正确的退化路径——fallback 按 `tweet_data["id"] == tweet_id` 精确挑出
+目标推文。所以修复只需让 `fetch_tweet_thread` 在目标推文被过滤掉时返回 `None`，调用方自动落到
+该 fallback：
+
+`feedgrab/fetchers/twitter_thread.py`，在同作者过滤之后、组装返回之前加闸：
+
+```python
+if tweet_id and not any(t.get("id") == tweet_id for t in thread_tweets):
+    logger.info(f"[Thread] 目标推文 {tweet_id} 不在根推 @{...} 的自回复链里"
+                f"（多半是别人在该 thread 下的回复）——退回单条抓取，"
+                f"避免把根推内容写成这条推文")
+    return None
+```
+
+- 抓别人的回复 → 输出那条回复本身 ✅
+- 抓 thread 作者自己的某一条 → 行为完全不变 ✅
+- 书签侧无需改动：其 thread 分支调的就是 `_fetch_via_graphql`，fallback 在其内部
+
+### 验证结果
+
+- 新增 `tests/test_twitter_thread_target.py` 6 例。**并验证了测试本身有效**：`git stash` 撤销修复后
+  `test_other_persons_reply_does_not_return_root_thread` 如期失败并返回了 @LaoVStories 的线程数据，
+  恢复修复后 6 例全过——排除「测试空转」。
+- 全量 436 → **442 passed**；service + worker + rendering + dispatch 交叉回归 115 passed。
+- **真实重抓验证**：备份并删除 3 个错误 md、从去重索引移除对应 3 个 item_id（12071 → 12068），
+  重跑 `https://x.com/i/history/bookmarks/2019055008676040850`。日志打出新逻辑并落盘正确产物：
+
+  ```
+  [Thread] 目标推文 2019060923751632901 不在根推 @LaoVStories 的自回复链里
+          ——退回单条抓取，避免把根推内容写成这条推文
+  ```
+
+  结果 成功 3 / 跳过 50 / 失败 1（失败那条是 TweetTombstone，账号被封，属正常跳过），
+  索引恢复 12068 → 12071。三个新文件的 `source` / `author` / 正文三者一一对应：
+
+  | 文件 | source | author | 正文 |
+  |---|---|---|---|
+  | `boris1993_…红的是ATM提款卡….md` | ClockWorkMe/2019060923751632901 | @ClockWorkMe | 那条回复本身 |
+  | `boris1993_…https x.md` | ClockWorkMe/2019061014575137081 | @ClockWorkMe | 那条回复本身 |
+  | `老V_…汇丰红狮子….md` | LaoVStories/2019023586112176237 | @LaoVStories | 根推 |
+
+- 全目录复检：44 文件 / 唯一正文 42 → **43**，内容重复组 2 → **1**，带 hash 后缀的撞名文件 2 → **0**。
+  仅剩的那 1 组是 @QuanIsMine 隔一个多月重发的相同内容（两条真实推文各存一份，**不是 bug**）。
+
+### 状态：已完成 ✅
+
+---
+
 ## 2026-08-31 · 桌面端 v0.1.22 · X 权限修复随安装包发布
 
 ### 背景
