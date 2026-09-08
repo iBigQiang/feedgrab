@@ -1,6 +1,14 @@
 # feedgrab Desktop 客户端说明
 
+**中文** | **[English](https://github.com/iBigQiang/feedgrab/blob/feedgrab-desktop/desktop/README_en.md)**
+
 feedgrab Desktop 是 feedgrab 的 Windows 图形客户端分支，面向不想长期使用命令行的用户。客户端采用 `Electron + Vite + React + TypeScript + Python Sidecar Worker` 架构：界面负责配置、登录态、任务和输出管理，抓取能力继续复用本仓库的 `feedgrab.service` 服务层。
+
+## 客户端界面
+
+![feedgrab Desktop 抓取工作台](https://raw.githubusercontent.com/iBigQiang/feedgrab/feedgrab-desktop/docs/feedgrab-desktop-index.png)
+
+上图是客户端启动后的「抓取工作台」主界面。左侧是抓取、任务、输出、登录、设置、诊断、赞助、社群导航，底部显示当前版本和更新入口；中间顶部列出当前已支持的平台，默认「URL自动识别」，抓取目标输入框支持 URL、关键词、关键词组和公众号账号，一行一个，下方选择输出目录后点击「开始抓取」；右上角是运行、完成、失败计数，右侧是实时日志。
 
 ## 下载入口
 
