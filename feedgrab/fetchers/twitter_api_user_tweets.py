@@ -37,7 +37,7 @@ from feedgrab.config import (
     x_api_min_views,
     parse_twitter_date_local,
 )
-from feedgrab.fetchers.twitter_api import (
+from feedgrab.fetchers.tweet_api_driver import (
     search_tweets,
     get_user_last_tweets,
     parse_api_tweet,

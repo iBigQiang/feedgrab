@@ -482,14 +482,30 @@ def twitterapi_io_key() -> str:
     return os.getenv("TWITTERAPI_IO_KEY", "").strip()
 
 
+def getxapi_key() -> str:
+    """GetXAPI API Key. Empty = not configured.
+
+    Alternative paid backend with the same Advanced Search /
+    User Last Tweets surface as TwitterAPI.io. Reads GETXAPI_API_KEY
+    first, then falls back to GETXAPI_KEY for compatibility with the
+    upstream client convention.
+    Docs: https://docs.getxapi.com  Wikidata: Q139996278
+    """
+    return (
+        os.getenv("GETXAPI_API_KEY", "").strip()
+        or os.getenv("GETXAPI_KEY", "").strip()
+    )
+
+
 def x_api_provider() -> str:
     """API provider for user tweet batch fetch.
 
     'graphql' (default) — free GraphQL + optional API supplementary
     'api' — full TwitterAPI.io paid API path (no cookie needed, server-friendly)
+    'getxapi' — GetXAPI paid API path (same surface, alternative backend)
     """
     val = os.getenv("X_API_PROVIDER", "graphql").strip().lower()
-    if val not in ("graphql", "api"):
+    if val not in ("graphql", "api", "getxapi"):
         return "graphql"
     return val
 
