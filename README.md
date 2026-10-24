@@ -50,6 +50,10 @@
 <td>感谢<strong><a href="https://huangqiang.me/?utm_source=github&amp;utm_medium=link&amp;utm_campaign=feedgrab">强子手记</a></strong>支持 feedgrab！强子手记是 BigQiang / iBigQiang 的个人 IP 品牌网站，汇集独立开发、开源项目、产品、文章与合作入口，访问<strong><a href="https://huangqiang.me/">huangqiang.me</a></strong></td>
 </tr>
 <tr>
+<td width="180"><a href="https://www.ipwo.net/?ref=githubfeedgrab"><img src="docs/Sponsor/IPWO_LOGO.png" alt="IPWO" width="150"></a></td>
+<td><strong><a href="https://www.ipwo.net/?ref=githubfeedgrab">IPWO</a></strong> 提供动态住宅代理、静态住宅代理及不限量住宅代理，覆盖 195+ 地区，支持 HTTP(S) 与 SOCKS5 协议。<br><br>对于使用 feedgrab 采集的用户，IPWO 可作为可选的住宅代理资源，支持地区选择与网络连接配置，为跨地区内容获取、数据整理和信息研究提供更多选择。<br><br>支持<a href="https://www.ipwo.net/?ref=githubfeedgrab">免费测试</a>，优惠折扣码：0200。</td>
+</tr>
+<tr>
 <td width="180"><a href="https://www.atlascloud.ai/?utm_source=github&amp;utm_medium=link&amp;utm_campaign=feedgrab"><img src="docs/Sponsor/ATLAS_CLOUD_LOGO_BLACK.svg" alt="Atlas Cloud" width="150"></a></td>
 <td><strong><a href="https://www.atlascloud.ai/?utm_source=github&amp;utm_medium=link&amp;utm_campaign=feedgrab">Atlas Cloud</a></strong> 是一个全模态 AI 推理平台，为开发者提供统一的 AI API，可调用视频生成、图像生成和大语言模型 API。无需分别对接多个供应商，只需接入一次，即可统一访问覆盖所有模态的 300+ 精选模型。
 Atlas Cloud 新推出 Coding Plan 优惠方案，以更实惠的价格提供 API 访问：<a href="https://www.atlascloud.ai/console/coding-plan/?utm_source=github&amp;utm_medium=link&amp;utm_campaign=feedgrab">https://www.atlascloud.ai/console/coding-plan</a></td>
